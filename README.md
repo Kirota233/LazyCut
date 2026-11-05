@@ -1,8 +1,8 @@
-# XM剪辑台 (v1.7.6)
+# LazyCut (v1.8.0)
 
 **把剧本、跑量剪辑流、字幕、音乐、样片水印与剪映自动化放进同一个 C# 原生超轻量工作台。**
 
-[下载最新安装包](https://github.com/Kirota233/XM-Editing-Studio/releases/latest) · [更新日志](CHANGELOG.md) · [架构与开发规范](docs/DEVELOPMENT.md) · [参与开发](CONTRIBUTING.md)
+[下载最新安装包](https://github.com/Kirota233/LazyCut/releases/latest) · [更新日志](CHANGELOG.md) · [架构与开发规范](docs/DEVELOPMENT.md) · [参与开发](CONTRIBUTING.md)
 
 ---
 
@@ -28,7 +28,7 @@
 # 1. 安装轻量前端构建依赖
 npm install
 
-# 2. 编译 C# 原生组件 (PeriodKeeper / JianYingEngine / WatermarkEngine / 小马剪辑台.exe) 与前端资源
+# 2. 编译 C# 原生组件 (PeriodKeeper / JianYingEngine / WatermarkEngine / LazyCut.exe) 与前端资源
 npm run build:native
 npm run build
 
@@ -39,4 +39,4 @@ npm test
 npm start
 ```
 
-> **自动化构建与发版**：安装包（`XM-Editing-Studio-<version>-Windows-x64-Setup.exe`，约 `1.28 MB`）由 GitHub Actions (`.github/workflows/release.yml`) 自动编译、测试、NSIS 打包并发布至 GitHub Releases。
+> **自动化构建与发版**：安装包（`LazyCut-<version>-Windows-x64-Setup.exe`，约 `1.28 MB`）由 GitHub Actions (`.github/workflows/release.yml`) 自动编译、测试、NSIS 打包并发布至 GitHub Releases。

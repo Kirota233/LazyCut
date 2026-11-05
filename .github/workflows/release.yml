@@ -93,7 +93,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: XM-Editing-Studio-${{ steps.meta.outputs.version }}-Windows-x64
+          name: LazyCut-${{ steps.meta.outputs.version }}-Windows-x64
           path: artifacts/release/*
           if-no-files-found: error
           retention-days: 30
@@ -105,12 +105,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ steps.meta.outputs.tag }}"
-          $setup = "artifacts/release/XM-Editing-Studio-${{ steps.meta.outputs.version }}-Windows-x64-Setup.exe"
+          $setup = "artifacts/release/LazyCut-${{ steps.meta.outputs.version }}-Windows-x64-Setup.exe"
           $sums = "artifacts/release/SHA256SUMS.txt"
           gh release view $tag > $null 2>&1
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $setup $sums --clobber
-            gh release edit $tag --title "XM Editing Studio $tag" --notes-file CHANGELOG.md
+            gh release edit $tag --title "LazyCut $tag" --notes-file CHANGELOG.md
           } else {
-            gh release create $tag $setup $sums --target "${{ github.sha }}" --title "XM Editing Studio $tag" --notes-file CHANGELOG.md
+            gh release create $tag $setup $sums --target "${{ github.sha }}" --title "LazyCut $tag" --notes-file CHANGELOG.md
           }

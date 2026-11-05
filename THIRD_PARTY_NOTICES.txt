@@ -1,4 +1,4 @@
-小马剪辑台：第三方组件说明
+LazyCut：第三方组件说明
 
 Watermark integration: https://github.com/Kirota233/watermarker
 Commit: 83f569e3d4158808f4a2a901792e9c741b07de31

@@ -22,8 +22,8 @@ export function compareSemver(a, b) {
 }
 
 export function createAutoUpdater({
-  currentVersion = '1.7.7',
-  repo = 'Kirota233/XM-Editing-Studio',
+  currentVersion = '1.8.0',
+  repo = 'Kirota233/LazyCut',
   downloadDirectory,
   fetcher = globalThis.fetch,
   spawnInstaller = (file, args) => {
@@ -86,7 +86,7 @@ export function createAutoUpdater({
       const response = await fetcher(`https://api.github.com/repos/${repo}/releases/latest`, {
         headers: {
           Accept: 'application/vnd.github+json',
-          'User-Agent': `XM-Editing-Studio/${currentVersion}`,
+          'User-Agent': `LazyCut/${currentVersion}`,
         },
       });
       if (!response.ok) {
@@ -157,7 +157,7 @@ export function createAutoUpdater({
 
       try {
         const response = await fetchAssetWithFallback(state.downloadUrl, {
-          headers: { 'User-Agent': `XM-Editing-Studio/${currentVersion}` },
+          headers: { 'User-Agent': `LazyCut/${currentVersion}` },
         });
         if (!response.ok || !response.body) {
           throw new Error(`下载更新失败 (HTTP ${response.status})`);

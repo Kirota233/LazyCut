@@ -1,6 +1,6 @@
-# XM剪辑台 C# 原生轻量化架构与开发规范
+# LazyCut C# 原生轻量化架构与开发规范
 
-本文档定义了 **XM剪辑台 (XM Editing Studio)** 的核心技术架构、红线约束与后续迭代开发规范。所有 Pull Request 与新功能开发均须严格遵守本规范。
+本文档定义了 **LazyCut** 的核心技术架构、红线约束与后续迭代开发规范。所有 Pull Request 与新功能开发均须严格遵守本规范。
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### 1. 严禁引入 Electron / Chromium / CEF / Node.js 桌面捆绑运行时
 - **禁止**在 `package.json`、构建脚本或安装包中引入 `electron`、`@electron/packager`、`electron-builder`、`nw.js`、`cefsharp` 或任何捆绑独立 Chromium / Node.js 运行时的框架。
-- **桌面宿主唯一方案**：桌面窗口、系统托盘、内嵌网页 AI 容器（DeepSeek / 豆包）、桌面宠物悬浮球与悬浮控制面板，必须统一由原生 C# 宿主 [`app/native/XMStudioHost.cs`](../app/native/XMStudioHost.cs)（编译产物 `小马剪辑台.exe`，约 `131 KB`）驱动，并复用 Windows 10/11 系统内置的 **Microsoft Edge WebView2 Runtime**（仅携带约 `790 KB` 的 `WebView2Loader.dll` 与托管互操作层，**零内核捆绑**）。
+- **桌面宿主唯一方案**：桌面窗口、系统托盘、内嵌网页 AI 容器（DeepSeek / 豆包）、桌面宠物悬浮球与悬浮控制面板，必须统一由原生 C# 宿主 [`app/native/XMStudioHost.cs`](../app/native/XMStudioHost.cs)（编译产物 `LazyCut.exe`，约 `131 KB`）驱动，并复用 Windows 10/11 系统内置的 **Microsoft Edge WebView2 Runtime**（仅携带约 `790 KB` 的 `WebView2Loader.dll` 与托管互操作层，**零内核捆绑**）。
 
 ### 2. 严禁引入 Python / PyInstaller / OpenCV / 独立 FFmpeg 等重型外部依赖
 - **禁止**引入 Python 脚本打包（如 PyInstaller）、OpenCV 运行时、独立 `ffmpeg.exe` 二进制或 WebAssembly 大体积多媒体包。
@@ -26,8 +26,8 @@
 - **体积红线**：
   - `JianYingEngine.exe` 控制在 `< 150 KB`（当前约 `111 KB`）。
   - `WatermarkEngine.exe` 控制在 `< 60 KB`（当前约 `25 KB`）。
-  - `小马剪辑台.exe` (`XMStudioHost`) 控制在 `< 200 KB`（当前约 `131 KB`）。
-  - 最终 NSIS 安装包 `XM-Editing-Studio-<version>-Windows-x64-Setup.exe` 总体积须保持在 **`< 2 MB`**（当前约 **`1.28 MB`**）。
+  - `LazyCut.exe` (`XMStudioHost`) 控制在 `< 200 KB`（当前约 `131 KB`）。
+  - 最终 NSIS 安装包 `LazyCut-<version>-Windows-x64-Setup.exe` 总体积须保持在 **`< 2 MB`**（当前约 **`1.28 MB`**）。
 
 ---
 

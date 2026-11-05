@@ -104,7 +104,7 @@ internal static class PeriodKeeper {
                             matches++;
                             if (apply && !Patches.Any(p => p.Pid == pid && p.Started == started && p.Address == address)) {
                                 if (Replace(process, address, Original[pattern], Replacement[pattern])) Patches.Add(new Patch { Pid=pid, Started=started, Address=address, Pattern=pattern });
-                                else LastError = "部分标点规则无法修改，请检查剪映与小马剪辑台是否使用相同的权限运行。";
+                                else LastError = "部分标点规则无法修改，请检查剪映与 LazyCut 是否使用相同的权限运行。";
                             }
                         }
                     }
@@ -207,7 +207,7 @@ internal static class PeriodKeeper {
         if(args.Length!=2 || args[0]!="--parent-pid" || !Int32.TryParse(args[1],out ParentPid) || ParentPid<=0)return 2;
         bool acquired;
         using(var mutex=new Mutex(true,"Local\\Xiaoma.Jianying.PeriodKeeper",out acquired)) {
-            if(!acquired) { Console.WriteLine("{\"error\":\"标点工具已在其他小马剪辑台窗口运行。\"}"); return 3; }
+            if(!acquired) { Console.WriteLine("{\"error\":\"标点工具已在其他 LazyCut 窗口运行。\"}"); return 3; }
             Timer timer=null;
             try {
                 timer=new Timer(delegate {

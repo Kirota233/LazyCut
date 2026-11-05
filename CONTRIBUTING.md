@@ -1,8 +1,8 @@
-# 参与 XM剪辑台开发
+# 参与 LazyCut 开发
 
 欢迎改进字幕规则、跑量剪辑流、音乐检索、AI 适配、主题、剪映自动化工具和使用说明。
 
-> **重要架构约束**：在开始开发前，请务必阅读 [《XM剪辑台 C# 原生轻量化架构与开发规范》](docs/DEVELOPMENT.md)。本项目**严禁引入 Electron、Chromium、Python 或独立 FFmpeg 等重型运行时**，桌面宿主与系统底层能力一律优先使用 Windows 原生 C# 构建，保持 `~1.3 MB` 超轻量安装包体积。
+> **重要架构约束**：在开始开发前，请务必阅读 [《LazyCut C# 原生轻量化架构与开发规范》](docs/DEVELOPMENT.md)。本项目**严禁引入 Electron、Chromium、Python 或独立 FFmpeg 等重型运行时**，桌面宿主与系统底层能力一律优先使用 Windows 原生 C# 构建，保持 `~1.3 MB` 超轻量安装包体积。
 
 ## 提交代码
 

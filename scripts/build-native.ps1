@@ -70,10 +70,10 @@ try {
         Copy-Item -LiteralPath (Join-Path $repoRoot 'app/public/watermark.png') -Destination (Join-Path $wmOutDir 'watermark.png') -Force
     }
 
-    # 4. Compile XMStudioHost.exe (Native C# + Windows WebView2 Desktop Host)
+    # 4. Compile LazyCut.exe (Native C# + Windows WebView2 Desktop Host)
     $hostOutDir = Join-Path $repoRoot 'app/build/host'
     New-Item -ItemType Directory -Path $hostOutDir -Force | Out-Null
-    $hostExeName = [regex]::Unescape("\u5c0f\u9a6c\u526a\u8f91\u53f0.exe")
+    $hostExeName = 'LazyCut.exe'
     $hostExe = Join-Path $hostOutDir $hostExeName
     $hostSource = Join-Path $repoRoot 'app/native/XMStudioHost.cs'
     $wvCore = Join-Path $repoRoot 'app/lib/webview2/Microsoft.Web.WebView2.Core.dll'

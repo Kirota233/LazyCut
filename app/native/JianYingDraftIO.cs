@@ -137,6 +137,7 @@ internal sealed class JianYingDraftIO
         // The optional local compatibility runtime survives a Jianying upgrade.
         string engineDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         AddRoot(roots, CompatibilityRoot(engineDirectory, Environment.GetEnvironmentVariable("XM_INSTALL_DATA")));
+        AddRoot(roots, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"LazyCut\draft-compat"));
         AddRoot(roots, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"XM-Editing-Studio\draft-compat"));
         AddRoot(roots, Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "draft-compat"));
         var files = new List<string>();
@@ -149,7 +150,7 @@ internal sealed class JianYingDraftIO
             }
         }
         var found = OrderLibraries(files, configured);
-        if (found.Count == 0) throw new FileNotFoundException("未找到草稿读取组件。请安装字幕兼容组件包到 XM剪辑台安装目录；无需回退剪映版本。"); return found;
+        if (found.Count == 0) throw new FileNotFoundException("未找到草稿读取组件。请安装字幕兼容组件包到 LazyCut 安装目录；无需回退剪映版本。"); return found;
     }
     internal static int Worker(string mode, string path) {
         var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
@@ -239,7 +240,7 @@ internal sealed class JianYingDraftIO
         }
         string guidance = candidates.Any(IsCompatibleLibrary)
             ? "已尝试 11.6.5 兼容接口仍未成功，请保留完整草稿及 attachment_pc_common.json 供进一步检查。"
-            : "当前未检测到 11.6.5 字幕兼容组件；仅有 11.7.5 接口可能返回错误 6。请将字幕兼容组件包安装到 XM剪辑台的 data/draft-compat，剪映可继续保持 11.7.5，无需回退。";
+            : "当前未检测到 11.6.5 字幕兼容组件；仅有 11.7.5 接口可能返回错误 6。请将字幕兼容组件包安装到 LazyCut 的 data/draft-compat，剪映可继续保持 11.7.5，无需回退。";
         throw new InvalidOperationException("所有可用草稿接口均读取失败，未执行写入。" + guidance + string.Join("；", failures));
     }
     private static IDictionary RunWorker(string mode, string path, string input, Action check, string library) {

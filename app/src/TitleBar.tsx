@@ -12,8 +12,8 @@ export interface UpdaterState {
 
 const DEFAULT_STATE: UpdaterState = {
   status: 'idle',
-  currentVersion: '1.7.7',
-  latestVersion: '1.7.7',
+  currentVersion: '1.8.0',
+  latestVersion: '1.8.0',
   hasUpdate: false,
   progress: 0,
 };
@@ -107,7 +107,7 @@ export function TitleBar({ onNavigate }: { onNavigate?: (tab: string) => void } 
     <header className="bos-titlebar" aria-label="窗口标题栏">
       <div className="bos-titlebar-drag">
         <span className="bos-titlebar-dot" aria-hidden="true" />
-        <span className="bos-titlebar-brand">XM剪辑台</span>
+        <span className="bos-titlebar-brand">LazyCut</span>
         <span className="bos-titlebar-version">v{state.currentVersion}</span>
       </div>
       <div className="bos-titlebar-actions">

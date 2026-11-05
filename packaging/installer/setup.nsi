@@ -6,26 +6,26 @@ Unicode true
 !include "x64.nsh"
 !include "generated-config.nsh"
 
-Name "XM剪辑台"
+Name "LazyCut"
 OutFile "${OUTPUT_FILE}"
-InstallDir "$LOCALAPPDATA\Programs\XM剪辑台"
+InstallDir "$LOCALAPPDATA\Programs\LazyCut"
 InstallDirRegKey HKCU "Software\Xiaoma\EditingStudio" "InstallLocation"
 RequestExecutionLevel user
 ManifestSupportedOS all
 ManifestDPIAware true
 SetCompressor /SOLID lzma
 SetCompressorDictSize 32
-BrandingText "XM剪辑台 · AI 创作工作空间"
+BrandingText "LazyCut · AI 创作工作空间"
 ShowInstDetails show
 ShowUninstDetails show
 AllowSkipFiles off
 VIProductVersion "${APP_FILE_VERSION}"
-VIAddVersionKey /LANG=2052 "ProductName" "XM剪辑台"
-VIAddVersionKey /LANG=2052 "FileDescription" "XM剪辑台安装程序"
+VIAddVersionKey /LANG=2052 "ProductName" "LazyCut"
+VIAddVersionKey /LANG=2052 "FileDescription" "LazyCut 安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "ProductVersion" "${APP_VERSION}"
-VIAddVersionKey /LANG=2052 "CompanyName" "小马"
-VIAddVersionKey /LANG=2052 "LegalCopyright" "XM剪辑台"
+VIAddVersionKey /LANG=2052 "CompanyName" "LazyCut"
+VIAddVersionKey /LANG=2052 "LegalCopyright" "LazyCut"
 
 !define PRODUCT_KEY "Software\Xiaoma\EditingStudio"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\XiaomaEditingStudio"
@@ -33,20 +33,20 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "XM剪辑台"
 !define MUI_ICON "${APP_ICON}"
 !define MUI_UNICON "${APP_ICON}"
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TITLE "欢迎安装XM剪辑台"
-!define MUI_WELCOMEPAGE_TEXT "中文、英文、西语台词整理，Gemini / DeepSeek / 豆包剧本分析与分段配乐、Suno 音乐生成、样片水印与 JianYing-Ai-Pro。$\r$\n$\r$\n版本 ${APP_VERSION}，适用于 Windows 10 / 11 64 位系统。内置运行组件，安装到当前用户，无需管理员权限。$\r$\n$\r$\n安装时会自动清理旧版本残留的无用程序文件，并完整保留你的个人配置、剧本历史与本地音乐。"
+!define MUI_WELCOMEPAGE_TITLE "欢迎安装 LazyCut"
+!define MUI_WELCOMEPAGE_TEXT "中文、英文、西语台词整理，Gemini / DeepSeek / 豆包剧本分析与分段配乐、Suno 音乐生成、样片水印与 JianYing-Ai-Pro。版本 ${APP_VERSION}，适用于 Windows 10 / 11 64 位系统。内置运行组件，安装到当前用户，无需管理员权限。安装时会自动清理旧版本残留的无用程序文件，并完整保留你的个人配置、剧本历史与本地音乐。"
 !insertmacro MUI_PAGE_WELCOME
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE ValidateDirectory
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\小马剪辑台.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "启动XM剪辑台"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\LazyCut.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "启动 LazyCut"
 !define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\使用说明.txt"
 !define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "查看使用说明"
 !insertmacro MUI_PAGE_FINISH
-!define MUI_UNCONFIRMPAGE_TEXT_TOP "卸载程序只移除软件文件与引擎缓存。模型连接、剧本历史、本地音乐和导出素材将保留。请先退出XM剪辑台。"
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "卸载程序只移除软件文件与引擎缓存。模型连接、剧本历史、本地音乐和导出素材将保留。请先退出 LazyCut。"
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_UNPAGE_FINISH
@@ -78,7 +78,7 @@ Function ValidateDirectory
   ${EndIf}
   ${If} $PreviousDirectory != ""
   ${AndIf} $PreviousDirectory != $INSTDIR
-    MessageBox MB_OK|MB_ICONEXCLAMATION "已安装的XM剪辑台（或旧名小马剪辑台）位于：$PreviousDirectory。请在原目录升级，或先卸载旧安装后再更换目录。" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "已安装的 LazyCut 位于：$PreviousDirectory。请在原目录升级，或先卸载旧安装后再更换目录。" /SD IDOK
     SetErrorLevel 2
     Abort
   ${EndIf}
@@ -104,7 +104,7 @@ Function ValidateDirectory
     FileClose $0
     StrCmp $1 "${INSTALL_ID}" directoryValid invalidDirectory
   invalidDirectory:
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择专用的空文件夹，或由此安装程序创建的XM剪辑台 / 小马剪辑台目录。不会覆盖其他文件夹中的文件。" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择专用的空文件夹，或由此安装程序创建的 LazyCut 目录。不会覆盖其他文件夹中的文件。" /SD IDOK
     SetErrorLevel 2
     Abort
   directoryValid:
@@ -115,14 +115,19 @@ Function ${PREFIX}CheckAppClosed
   nsExec::ExecToStack 'taskkill /F /IM PeriodKeeper.exe /IM JianYingEngine.exe /IM WatermarkEngine.exe'
   Pop $0
   Pop $0
-  IfFileExists "$INSTDIR\小马剪辑台.exe" 0 appClosed
+  IfFileExists "$INSTDIR\LazyCut.exe" 0 checkLegacyExe
   retryClose:
+    System::Call 'kernel32::CreateFileW(w "$INSTDIR\LazyCut.exe", i 0x40000000, i 0, p 0, i 3, i 0, p 0) p.r0'
+    IntCmp $0 -1 appInUse
+    System::Call 'kernel32::CloseHandle(p r0)'
+  checkLegacyExe:
+    IfFileExists "$INSTDIR\小马剪辑台.exe" 0 appClosed
     System::Call 'kernel32::CreateFileW(w "$INSTDIR\小马剪辑台.exe", i 0x40000000, i 0, p 0, i 3, i 0, p 0) p.r0'
     IntCmp $0 -1 appInUse
     System::Call 'kernel32::CloseHandle(p r0)'
     Goto appClosed
   appInUse:
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "程序正在运行或文件不可写。请退出XM剪辑台后点击重试。" /SD IDCANCEL IDRETRY retryClose
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "程序正在运行或文件不可写。请退出 LazyCut 后点击重试。" /SD IDCANCEL IDRETRY retryClose
     SetErrorLevel 2
     Abort
   appClosed:
@@ -131,13 +136,12 @@ FunctionEnd
 !insertmacro CHECK_APP_CLOSED ""
 !insertmacro CHECK_APP_CLOSED "un."
 
-Section "XM剪辑台（必选）" MainSection
+Section "LazyCut（必选）" MainSection
   SectionIn RO
   Call ValidateDirectory
   Call CheckAppClosed
   ; Clean all obsolete files and subdirectories from any previous installation in $INSTDIR
   RMDir /r "$INSTDIR\locales"
-  RMDir /r "$INSTDIR\resources"
   RMDir /r "$INSTDIR\swiftshader"
   RMDir /r "$INSTDIR\.xiaoma-update-backups"
   Delete "$INSTDIR\*.dll"
@@ -151,6 +155,7 @@ Section "XM剪辑台（必选）" MainSection
   ; Clean stale cached engine binaries in AppData (preserves user settings, templates, scripts, and music)
   RMDir /r "$APPDATA\xm-editing-studio\jianying-ai\engine"
   RMDir /r "$APPDATA\XM剪辑台\jianying-ai\engine"
+  RMDir /r "$APPDATA\LazyCut\jianying-ai\engine"
   RMDir /r "$APPDATA\xm-editing-studio-source\jianying-ai\engine"
   SetOutPath "$INSTDIR"
   FileOpen $0 "$INSTDIR\xiaoma-install.id" w
@@ -159,32 +164,34 @@ Section "XM剪辑台（必选）" MainSection
   SetOverwrite on
   !include "generated-install.nsh"
   SetOutPath "$INSTDIR"
-  WriteUninstaller "$INSTDIR\卸载XM剪辑台.exe"
+  WriteUninstaller "$INSTDIR\卸载LazyCut.exe"
   WriteRegStr HKCU "${PRODUCT_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "XM剪辑台"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "LazyCut"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "小马"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "LazyCut"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\小马剪辑台.exe,0"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '$\"$INSTDIR\卸载XM剪辑台.exe$\"'
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '$\"$INSTDIR\卸载XM剪辑台.exe$\" /S'
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\LazyCut.exe,0"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '$\"$INSTDIR\卸载LazyCut.exe$\"'
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '$\"$INSTDIR\卸载LazyCut.exe$\" /S'
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "EstimatedSize" ${INSTALLED_SIZE_KB}
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
-  CreateDirectory "$SMPROGRAMS\XM剪辑台"
-  CreateShortcut "$SMPROGRAMS\XM剪辑台\XM剪辑台.lnk" "$INSTDIR\小马剪辑台.exe"
-  CreateShortcut "$SMPROGRAMS\XM剪辑台\使用说明.lnk" "$INSTDIR\使用说明.txt"
-  CreateShortcut "$SMPROGRAMS\XM剪辑台\卸载.lnk" "$INSTDIR\卸载XM剪辑台.exe"
+  Delete "$DESKTOP\XM剪辑台.lnk"
+  RMDir /r "$SMPROGRAMS\XM剪辑台"
+  CreateDirectory "$SMPROGRAMS\LazyCut"
+  CreateShortcut "$SMPROGRAMS\LazyCut\LazyCut.lnk" "$INSTDIR\LazyCut.exe"
+  CreateShortcut "$SMPROGRAMS\LazyCut\使用说明.lnk" "$INSTDIR\使用说明.txt"
+  CreateShortcut "$SMPROGRAMS\LazyCut\卸载.lnk" "$INSTDIR\卸载LazyCut.exe"
 SectionEnd
 
 Section "创建桌面快捷方式" DesktopSection
   SetOutPath "$INSTDIR"
-  CreateShortcut "$DESKTOP\XM剪辑台.lnk" "$INSTDIR\小马剪辑台.exe"
+  CreateShortcut "$DESKTOP\LazyCut.lnk" "$INSTDIR\LazyCut.exe"
 SectionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${MainSection} "安装软件、内置运行环境、本地水印引擎和开始菜单入口（自动清理旧版本冗余文件）。"
-  !insertmacro MUI_DESCRIPTION_TEXT ${DesktopSection} "在当前用户桌面创建XM剪辑台快捷方式。"
+  !insertmacro MUI_DESCRIPTION_TEXT ${DesktopSection} "在当前用户桌面创建 LazyCut 快捷方式。"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 Function un.onInit
@@ -212,21 +219,25 @@ Section "Uninstall"
   !include "generated-uninstall-dirs.nsh"
   ReadRegStr $0 HKCU "${PRODUCT_KEY}" "InstallLocation"
   ${If} $0 == $INSTDIR
+    Delete "$DESKTOP\LazyCut.lnk"
     Delete "$DESKTOP\XM剪辑台.lnk"
-    Delete "$SMPROGRAMS\XM剪辑台\XM剪辑台.lnk"
-    Delete "$SMPROGRAMS\XM剪辑台\使用说明.lnk"
-    Delete "$SMPROGRAMS\XM剪辑台\卸载.lnk"
-    RMDir "$SMPROGRAMS\XM剪辑台"
+    Delete "$SMPROGRAMS\LazyCut\LazyCut.lnk"
+    Delete "$SMPROGRAMS\LazyCut\使用说明.lnk"
+    Delete "$SMPROGRAMS\LazyCut\卸载.lnk"
+    RMDir "$SMPROGRAMS\LazyCut"
+    RMDir /r "$SMPROGRAMS\XM剪辑台"
     DeleteRegKey HKCU "${UNINSTALL_KEY}"
     DeleteRegKey HKCU "${PRODUCT_KEY}"
     DeleteRegKey /ifempty HKCU "Software\Xiaoma"
   ${EndIf}
   Delete "$INSTDIR\xiaoma-install.id"
+  Delete "$INSTDIR\卸载LazyCut.exe"
   Delete "$INSTDIR\卸载XM剪辑台.exe"
   Delete "$INSTDIR\卸载小马剪辑台.exe"
   RMDir /r "$INSTDIR\.xiaoma-update-backups"
   RMDir /r "$APPDATA\xm-editing-studio\jianying-ai\engine"
   RMDir /r "$APPDATA\XM剪辑台\jianying-ai\engine"
+  RMDir /r "$APPDATA\LazyCut\jianying-ai\engine"
   RMDir /r "$APPDATA\xm-editing-studio-source\jianying-ai\engine"
   RMDir "$INSTDIR"
   Goto uninstallDone

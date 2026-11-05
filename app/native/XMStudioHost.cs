@@ -1705,7 +1705,7 @@ namespace XMStudioHost
 
     internal sealed class StudioAppContext : ApplicationContext
     {
-        public const string CurrentVersion = "1.7.7";
+        public const string CurrentVersion = "1.8.0";
         public const int AppPort = 37651;
         private readonly string _baseDir;
         private readonly string _userDataDir;
@@ -1786,7 +1786,7 @@ namespace XMStudioHost
             { "latestVersion", CurrentVersion },
             { "hasUpdate", false },
             { "progress", 0 },
-            { "releaseUrl", "https://github.com/Kirota233/XM-Editing-Studio/releases" },
+            { "releaseUrl", "https://github.com/Kirota233/LazyCut/releases" },
             { "downloadUrl", "" },
             { "assetName", "" },
             { "expectedSha256", "" },
@@ -1798,7 +1798,10 @@ namespace XMStudioHost
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
             _baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            _userDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XM剪辑台");
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string legacyDataDir = Path.Combine(appData, "XM剪辑台");
+            string newDataDir = Path.Combine(appData, "LazyCut");
+            _userDataDir = (Directory.Exists(legacyDataDir) && !Directory.Exists(newDataDir)) ? legacyDataDir : newDataDir;
             Directory.CreateDirectory(_userDataDir);
 
             _clientDir = ResolveExistingDir(
@@ -2003,7 +2006,7 @@ namespace XMStudioHost
         {
             _mainForm = new Form
             {
-                Text = "XM剪辑台",
+                Text = "LazyCut",
                 Width = 1440,
                 Height = 940,
                 MinimumSize = new Size(920, 680),
@@ -3658,7 +3661,7 @@ namespace XMStudioHost
             {
                 var res = await Task.Run(() => PerformHttpFetch(new Dictionary<string, object>
                 {
-                    { "url", "https://api.github.com/repos/Kirota233/XM-Editing-Studio/releases/latest" },
+                    { "url", "https://api.github.com/repos/Kirota233/LazyCut/releases/latest" },
                     { "headers", new Dictionary<string, object> { { "Accept", "application/vnd.github+json" } } }
                 }));
                 if (Convert.ToBoolean(res["ok"]))
@@ -3715,7 +3718,7 @@ namespace XMStudioHost
             {
                 using (var wc = new WebClient())
                 {
-                    wc.Headers.Add("User-Agent", "XM-Editing-Studio/" + CurrentVersion);
+                    wc.Headers.Add("User-Agent", "LazyCut/" + CurrentVersion);
                     wc.DownloadFile(dlUrl, target);
                 }
             });
@@ -3742,18 +3745,18 @@ namespace XMStudioHost
         private void InitSystemTray()
         {
             var menu = new ContextMenuStrip();
-            menu.Items.Add("打开 XM剪辑台", null, (s, e) => { _mainForm.Show(); _mainForm.Activate(); });
+            menu.Items.Add("打开 LazyCut", null, (s, e) => { _mainForm.Show(); _mainForm.Activate(); });
             menu.Items.Add("召唤/隐藏 悬浮窗", null, async (s, e) => await HandleCompanionActionAsync("toggle", null));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("剪映自动化与样片水印", null, (s, e) => { _mainForm.Show(); _mainForm.Activate(); SendEventToMain("bos:tray-navigate", "jianying"); });
             menu.Items.Add("文案拆解与智能配乐", null, (s, e) => { _mainForm.Show(); _mainForm.Activate(); SendEventToMain("bos:tray-navigate", "workspace"); });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("彻底退出 XM剪辑台", null, (s, e) => { _quitting = true; _mainForm.Close(); });
+            menu.Items.Add("彻底退出 LazyCut", null, (s, e) => { _quitting = true; _mainForm.Close(); });
 
             _tray = new NotifyIcon
             {
                 Icon = LoadAppIcon(),
-                Text = "XM剪辑台 v" + CurrentVersion,
+                Text = "LazyCut v" + CurrentVersion,
                 ContextMenuStrip = menu,
                 Visible = true
             };

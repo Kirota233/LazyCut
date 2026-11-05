@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 
-$ProductCn = [regex]::Unescape("XM\u526A\u8F91\u53F0")
+$ProductCn = "LazyCut"
 $GuideFileCn = [regex]::Unescape("\u4F7F\u7528\u8BF4\u660E.txt")
 
 $PackageJson = Get-Content (Join-Path $Root "package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -64,7 +64,7 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $InstallerDir = Join-Path $Root "packaging\installer"
 $IconPath = Join-Path $Root "app\assets\app-icon.ico"
 $InstallerGuidePath = Join-Path $InstallerDir $GuideFileCn
-$SetupExeName = "XM-Editing-Studio-$Version-Windows-x64-Setup.exe"
+$SetupExeName = "LazyCut-$Version-Windows-x64-Setup.exe"
 $SetupExePath = Join-Path $OutputDir $SetupExeName
 
 Write-Host "[1/2] Building NSIS installer: $SetupExeName"

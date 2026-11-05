@@ -1,4 +1,4 @@
-XM剪辑台 1.6.3 使用说明
+LazyCut 1.8.0 使用说明
 
 适用系统：Windows 10 / Windows 11 64 位（x64）。
 
@@ -9,9 +9,9 @@ XM剪辑台 1.6.3 使用说明
 核心工作流
 1. 剧本与台词整理：识别中文、英文、西语角色台词，自动剔除场景与动作说明。开启标点保护后，“复制到剪映”会转为兼容标点以便文稿匹配。
 2. AI 分析与配乐：支持已配置的 Gemini / Suno API，或直接登录内置的 DeepSeek、豆包官方网页版免密钥分析剧情、匹配本地音乐库或生成 Suno 配乐。
-3. 样片水印：内置 WebAV 硬件加速与本地 FFmpeg 双引擎批量合成样片水印。
+3. 样片水印：内置 Windows Media Foundation 硬件加速原生 C# 水印引擎批量合成样片水印。
 4. 剪映自动化（JianYing-Ai-Pro）：采用轻量级原生 C# 引擎，支持 F8 录制坐标、F9 跳过步骤、F10 紧急中断、AI 识别草稿批量导出、SRT 字幕提取与批量改名。
 
 说明
 卸载仅移除本安装器管理的程序文件与引擎缓存，保留个人配置与本地素材。
-发布页与更新记录：https://github.com/Kirota233/XM-Editing-Studio/releases
+发布页与更新记录：https://github.com/Kirota233/LazyCut/releases

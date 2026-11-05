@@ -277,7 +277,7 @@ replaceOnce(
   'window.localStorage.setItem(u6,JSON.stringify(x))',
   'window.localStorage.setItem(u6,JSON.stringify(x));window.localStorage.setItem("xm.providers.cache",JSON.stringify(x));window.blackObsidian?.companionAction?.("sync-providers",x)'
 );
-code = code.replaceAll('黑曜信号台', 'XM剪辑台');
+code = code.replaceAll('黑曜信号台', 'LazyCut');
 
 // 9. Replace the original decorative rail with functional local shortcuts.
 const railStart = code.indexOf('s.jsxs("aside",{className:"inspiration-rail"');
@@ -301,7 +301,7 @@ const version = createHash('sha256').update(code).update(css).digest('hex').slic
 let html = fs.readFileSync(path.join(original, 'index.html'), 'utf8')
   .replace(jsName, `music-studio.js?v=${version}`)
   .replace(cssName, `music-studio.css?v=${version}`)
-  .replaceAll('黑曜信号台', 'XM剪辑台');
+  .replaceAll('黑曜信号台', 'LazyCut');
 
 fs.writeFileSync(path.join(root, 'dist/client/index.html'), html);
 console.log('Built music-studio.js and music-studio.css');

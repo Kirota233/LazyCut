@@ -13,7 +13,7 @@ for (const file of [
   'app/build/jianying/engine.json',
   'app/build/watermark/WatermarkEngine.exe',
   'app/build/watermark/engine.json',
-  'app/build/host/小马剪辑台.exe',
+  'app/build/host/LazyCut.exe',
   'app/lib/webview2/Microsoft.Web.WebView2.Core.dll',
   'app/lib/webview2/Microsoft.Web.WebView2.WinForms.dll',
   'app/lib/webview2/WebView2Loader.dll',
@@ -21,7 +21,7 @@ for (const file of [
   await fs.access(file);
 }
 
-const outDir = path.join(root, 'artifacts', 'XM剪辑台-win32-x64');
+const outDir = path.join(root, 'artifacts', 'LazyCut-win32-x64');
 await fs.rm(outDir, { recursive: true, force: true }).catch(() => {});
 await fs.mkdir(path.join(outDir, 'resources', 'client'), { recursive: true });
 await fs.mkdir(path.join(outDir, 'resources', 'helpers'), { recursive: true });
@@ -29,7 +29,7 @@ await fs.mkdir(path.join(outDir, 'resources', 'jianying'), { recursive: true });
 await fs.mkdir(path.join(outDir, 'resources', 'watermark'), { recursive: true });
 
 // 1. Copy Native C# + WebView2 Host (~56 KB) and WebView2 Loader DLLs (~790 KB total, zero bundled Chromium kernel!)
-await fs.copyFile('app/build/host/小马剪辑台.exe', path.join(outDir, '小马剪辑台.exe'));
+await fs.copyFile('app/build/host/LazyCut.exe', path.join(outDir, 'LazyCut.exe'));
 for (const dll of ['Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll']) {
   await fs.copyFile(path.join('app/lib/webview2', dll), path.join(outDir, dll));
 }
