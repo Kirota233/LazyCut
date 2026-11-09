@@ -483,7 +483,7 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
             </button>
             <button type="button" className={pendingAct === 'split_upper_lower' ? 'is-loading' : ''} disabled={locked || !state.draftDir} onClick={() => run('split_upper_lower')}>
               {pendingAct === 'split_upper_lower' && <span className="bos-btn-spinner" aria-hidden="true" />}
-              检测「XXX上」复制为「XXX下」
+              检测「XXX-1」复制为「XXX-2」
             </button>
           </div>
           <small>检查并还原标准标点可将保护标点（․ ﹒ ‚ ﹐）还原为标准英文 . 与 , 且保持花字样式与时间轴不变。操作前请先退出剪映，写入前自动创建安全备份。</small>

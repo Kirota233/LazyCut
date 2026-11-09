@@ -3,6 +3,7 @@ import { getSunoSongs } from '../server/suno-response.mjs';
 import { isGeminiModel, scoreMessages, parseScoreResponse, validateScoreRequest, materialTexts } from '../shared/script-score.mjs';
 import { validateLibraryInput, keywordMessages, parseKeywords, shortlistTracks, matchMessages, parseMatches } from '../shared/library-match.mjs';
 import { segmentMessages, segmentRetryMessages, parseSegments, segmentCandidates, segmentMatchMessages, parseSegmentMatches } from '../shared/script-segments.mjs';
+import { analyzeBatchMusic } from '../shared/batch-music.mjs';
 import { buildJianyingAIRequest, DEFAULT_GEMINI_BASE_URL } from '../electron/jianying-ai.mjs';
 import { webAIScriptPrompt } from '../shared/web-ai-prompts.mjs';
 import { webAIPageScript } from '../electron/web-ai-dom.mjs';
@@ -159,11 +160,18 @@ if (wv && !window.blackObsidian) {
     url.pathname = `${url.pathname}/suno/${endpoint.replace(/^\/+/, '')}` || '/';
     return url;
   }
+  function providerBaseUrl(provider: any) {
+    if (provider?.protocol === 'deepseek' && (!provider.baseUrl || !String(provider.baseUrl).trim())) {
+      return 'https://api.deepseek.com';
+    }
+    if (provider?.protocol === 'gemini' && (!provider.baseUrl || !String(provider.baseUrl).trim())) {
+      return DEFAULT_GEMINI_BASE_URL;
+    }
+    return provider?.baseUrl;
+  }
   function buildProviderRequest(provider: any, model: string, messages: any[]) {
     const protocol = provider.protocol || 'openai';
-    const rawBaseUrl = protocol === 'gemini' && (!provider.baseUrl || !String(provider.baseUrl).trim())
-      ? DEFAULT_GEMINI_BASE_URL
-      : provider.baseUrl;
+    const rawBaseUrl = providerBaseUrl(provider);
     const url = endpointUrl(
       rawBaseUrl,
       protocol === 'anthropic' ? '/messages' : protocol === 'gemini' ? `/models/${encodeURIComponent(model)}:generateContent` : '/chat/completions'
@@ -273,7 +281,7 @@ if (wv && !window.blackObsidian) {
         filtered.sort(compareGeminiModels);
         return { ok: true, models: [...new Set(filtered)] };
       } else {
-        const url = endpointUrl(provider.baseUrl, '/models');
+        const url = endpointUrl(providerBaseUrl(provider), '/models');
         const resp = await hostFetch(url.toString(), {
           method: 'GET',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.apiKey.trim()}` },
@@ -368,6 +376,13 @@ if (wv && !window.blackObsidian) {
       }
       return { analysis, matches, customKeywords: input.customKeywords, total: input.tracks.length, evaluated: candidates.length };
     }
+    if (pathname === '/api/script/batch-library-match') {
+      return analyzeBatchMusic(
+        body,
+        async (messages: any[]) => (await requestProvider(body.provider, body.model, messages)).text,
+        { deepseekApi: body.provider?.protocol === 'deepseek' }
+      );
+    }
     if (pathname === '/api/music/generate') {
       const options = normalizeMusicOptions(body);
       const url = sunoEndpointUrl(body.provider.baseUrl, 'submit/music');
@@ -446,6 +461,7 @@ if (wv && !window.blackObsidian) {
     getPeriodKeeperStatus: () => invokeHost('period-status'),
     probePeriodKeeper: () => invokeHost('period-probe'),
     setPeriodKeeperEnabled: (enabled: boolean, mode: string) => invokeHost('period-enabled', { enabled, mode }),
+    setBatchPunctuationEnabled: (enabled: boolean) => invokeHost('period-enabled', { enabled: Boolean(enabled), mode: 'compatible' }),
     copySubtitleText: (text: string) => invokeHost('period-copy', { text: String(text ?? '') }),
 
     jianyingAction: (action: string, args: any, connection: any) => {

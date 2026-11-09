@@ -102,7 +102,7 @@ test('right quick rail is removed while the left sidebar keeps an accessible res
     assert.match(creditsText, new RegExp(name));
   }
   const titleBar = ui.TitleBar();
-  assert.match(textOf(titleBar), /v1\.8\.0/);
+  assert.match(textOf(titleBar), /v1\.8\.1/);
   assert.match(textOf(titleBar), /悬浮窗/);
   const jyTree = ui.JianyingStudio({ active: true, providers: [], onNavigate: () => {} });
   assert.match(textOf(jyTree), /剪映自动化功能请使用桌面「悬浮窗」/);
@@ -218,9 +218,9 @@ test('C# JianYingEngine native binary responds to status, settings, regex previe
       await aiHost.dispose();
     }
 
-    // Test split_upper_lower over JSON-RPC: XXX上 -> XXX下 with out-point converted to in-point
+    // Test split_upper_lower over JSON-RPC: XXX-1 -> XXX-2 with out-point converted to in-point
     const draftsRoot = path.join(root, 'jy-drafts');
-    const upperFolder = path.join(draftsRoot, '霸总归来05上');
+    const upperFolder = path.join(draftsRoot, '霸总归来05-1');
     await fs.mkdir(upperFolder, { recursive: true });
     await fs.writeFile(
       path.join(upperFolder, 'draft_content.json'),
@@ -235,7 +235,7 @@ test('C# JianYingEngine native binary responds to status, settings, regex previe
       splitState = await host.run('status', {});
     }
     assert.equal(splitState.busy, false);
-    const lowerJsonRaw = await fs.readFile(path.join(draftsRoot, '霸总归来05下', 'draft_content.json'), 'utf8');
+    const lowerJsonRaw = await fs.readFile(path.join(draftsRoot, '霸总归来05-2', 'draft_content.json'), 'utf8');
     const lowerJson = JSON.parse(lowerJsonRaw);
     assert.equal(lowerJson.config.export_range.start, 50000000);
     assert.equal(lowerJson.config.export_range.duration, 70000000);

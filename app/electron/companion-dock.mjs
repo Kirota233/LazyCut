@@ -489,6 +489,32 @@ function panelHtml(acrylic) {
     </div>
   </div>
 
+  <!-- Wizard Recording Steps Reminder Modal Overlay -->
+  <div class="modal-overlay" id="wizardGuideModalOverlay" hidden>
+    <div class="modal-dialog" style="gap:8px">
+      <div class="row" style="align-items:flex-start">
+        <div>
+          <div class="title" style="font-size:13px;font-weight:750;color:#ffcf6e">🎯 录制坐标 · 操作步骤提醒</div>
+          <div style="font-size:10.5px;color:#94a3b8;margin-top:2px">
+            当前模式：<span id="wizardGuideModeLabel" style="color:#ffcf6e;font-weight:700">收起至首页 · 后台</span>
+          </div>
+        </div>
+        <button class="btn" id="jyCloseWizardGuideTop" style="padding:2px 6px;font-size:11px;min-width:0">✕</button>
+      </div>
+      <div id="wizardGuideCurrentBanner" style="background:rgba(240,185,82,0.14);border:1px solid rgba(240,185,82,0.45);border-radius:8px;padding:7px 9px;font-size:11.5px;color:#ffe4a0;font-weight:650;line-height:1.45">
+        准备就绪：请先随便打开一个剪映草稿进入编辑界面，将鼠标悬停在目标按钮上按 <kbd style="background:#0a0d12;padding:1px 5px;border-radius:4px;border:1px solid rgba(255,207,110,0.4);color:#ffcf6e">F8</kbd> 逐步采集。
+      </div>
+      <div id="wizardGuideStepsList" style="display:flex;flex-direction:column;gap:5px;font-size:11px;color:#cbd5e1;line-height:1.45"></div>
+      <div style="font-size:10px;color:#94a3b8;line-height:1.4">
+        💡 提示：录制期间鼠标只需悬停在剪映对应按钮上按 <b>F8</b> 即可记录，按 <b>F10</b> 可随时中断录制。
+      </div>
+      <div class="grid" style="margin-top:4px">
+        <button class="btn danger" id="jyStopWizardFromModal">中断录制 · F10</button>
+        <button class="btn primary" id="jyDismissWizardGuide">我知道了（继续按 F8）</button>
+      </div>
+    </div>
+  </div>
+
   <div class="scroll">
 
     <!-- STAGE 01: 批量导出 -->
@@ -515,7 +541,7 @@ function panelHtml(acrylic) {
         <button class="btn" id="jyScan">📸 截图识别</button>
         <button class="btn primary" id="jyExport">🚀 批量导出</button>
       </div>
-      <button class="btn" id="jySplitDraftsExport" type="button" title="检测草稿目录中以「上」结尾的文件夹，复制为「XXX下」并将原草稿出点设为入点">✂️ 检测「XXX上」复制为「XXX下」（原出点设入点）</button>
+      <button class="btn" id="jySplitDraftsExport" type="button" title="检测草稿目录中以「-1」结尾的文件夹，复制为「XXX-2」并将原草稿出点设为入点">✂️ 检测「XXX-1」复制为「XXX-2」（原出点设入点）</button>
 
       <div id="jyPostScanArea" style="display:flex;flex-direction:column;gap:8px">
       <div class="table-wrap">
@@ -570,7 +596,7 @@ function panelHtml(acrylic) {
         <button class="btn" id="jyPunctuation">检查并还原标准标点</button>
         <button class="btn" id="jyUnhide">恢复所有草稿字幕显示</button>
       </div>
-      <button class="btn" id="jySplitDrafts" type="button" title="检测草稿目录中以「上」结尾的文件夹，复制为「XXX下」并将原草稿出点设为入点">✂️ 检测「XXX上」复制为「XXX下」（原出点设入点）</button>
+      <button class="btn" id="jySplitDrafts" type="button" title="检测草稿目录中以「-1」结尾的文件夹，复制为「XXX-2」并将原草稿出点设为入点">✂️ 检测「XXX-1」复制为「XXX-2」（原出点设入点）</button>
       <small style="font-size:10px;color:#94a3b8">提示：检查并还原标准标点可将保护标点（․﹒‚﹐）还原为标准英文 . , 且不改动样式与时间轴；修改前请先退出剪映，工具会自动备份草稿 JSON。</small>
       <details class="sub-panel log-panel" open>
         <summary class="log-summary">
@@ -953,6 +979,16 @@ function panelHtml(acrylic) {
       $('modalCard').hidden = !m;
       if (m) { $('modalTitle').textContent = m.title || '确认'; $('modalMsg').textContent = m.message || ''; }
 
+      if ($('wizardGuideModalOverlay')) {
+        if (jy.recording) {
+          updateWizardGuideModal(jy.mode || currentExportMode, jy.guide || '');
+          if (!wizardGuideDismissed) $('wizardGuideModalOverlay').hidden = false;
+        } else {
+          wizardGuideDismissed = false;
+          $('wizardGuideModalOverlay').hidden = true;
+        }
+      }
+
       $('wmDot').className = 'dot ' + (wm.running ? 'run' : wm.totalCount ? 'on' : '');
       $('wmMeta').textContent = wm.totalCount ? wm.completedCount + '/' + wm.totalCount + ' · ' + wm.overallProgress + '%' : '空闲';
       $('wmBar').style.width = (wm.overallProgress || 0) + '%';
@@ -974,11 +1010,58 @@ function panelHtml(acrylic) {
       });
     }
 
+    let wizardGuideDismissed = false;
+    function updateWizardGuideModal(mode, guideText) {
+      const isWait = mode === 'wait_close';
+      if ($('wizardGuideModeLabel')) {
+        $('wizardGuideModeLabel').textContent = isWait ? '等待完成 · 逐个 (4步)' : '收起至首页 · 后台 (3步)';
+      }
+      if ($('wizardGuideCurrentBanner')) {
+        $('wizardGuideCurrentBanner').innerHTML = guideText
+          ? ('当前提示：<span style="color:#ffcf6e">' + String(guideText).replace(/</g, '&lt;') + '</span>')
+          : '准备就绪：请先随便打开一个剪映草稿进入编辑界面，将鼠标悬停在目标按钮上按 <kbd style="background:#0a0d12;padding:1px 5px;border-radius:4px;border:1px solid rgba(255,207,110,0.4);color:#ffcf6e">F8</kbd> 逐步采集。';
+      }
+      const steps = isWait
+        ? [
+            '步骤 1/4：在剪映编辑界面，鼠标移到右上角「导出」按钮上，按 F8',
+            '步骤 2/4：点击打开导出设置弹窗，鼠标移到弹窗右下角「导出」确认按钮上，按 F8',
+            '步骤 3/4：点击开始导出，待导出完成出现「关闭」按钮后，鼠标移到「关闭」按钮上，按 F8',
+            '步骤 4/4：关闭导出弹窗回到编辑界面后，鼠标移到窗口右上角「×（关闭草稿回首页）」上，按 F8'
+          ]
+        : [
+            '步骤 1/3：在剪映编辑界面，鼠标移到右上角「导出」按钮上，按 F8',
+            '步骤 2/3：点击打开导出设置弹窗，鼠标移到弹窗右下角「导出」确认按钮上，按 F8',
+            '步骤 3/3：点击确认导出后，鼠标移到导出进度弹窗的「收起至首页」按钮上，按 F8'
+          ];
+      let activeIdx = 0;
+      const mStep = String(guideText || '').match(/步骤\\s*(\\d+)\\s*\\/\\s*(\\d+)/);
+      if (mStep) activeIdx = Math.max(0, Number(mStep[1]) - 1);
+      if ($('wizardGuideStepsList')) {
+        $('wizardGuideStepsList').innerHTML = steps.map((txt, i) => {
+          const isCur = i === activeIdx;
+          const isDone = i < activeIdx;
+          const bg = isCur ? 'rgba(240,185,82,0.16)' : isDone ? 'rgba(52,211,153,0.10)' : 'rgba(15,23,42,0.65)';
+          const bd = isCur ? 'rgba(240,185,82,0.55)' : isDone ? 'rgba(52,211,153,0.35)' : 'rgba(148,163,184,0.18)';
+          const col = isCur ? '#ffcf6e' : isDone ? '#6ee7b7' : '#cbd5e1';
+          const badge = isDone ? '✓ ' : isCur ? '👉 ' : '• ';
+          return '<div style="padding:6px 8px;border-radius:7px;background:' + bg + ';border:1px solid ' + bd + ';color:' + col + ';font-weight:' + (isCur ? '700' : '500') + '">' + badge + txt + '</div>';
+        }).join('');
+      }
+    }
+
     $('closeBtn').onclick = () => act('panel', false);
     $('dockBtn').onclick = () => act('toggle-dock');
     $('pkSwitch').onclick = () => act('toggle-period');
     if ($('petThemeBtn')) $('petThemeBtn').onclick = () => act('toggle-pet-theme');
-    $('jyWizard').onclick = () => act('jy-wizard', { mode: currentExportMode }, $('jyWizard'), '录制中…');
+    $('jyWizard').onclick = () => {
+      wizardGuideDismissed = false;
+      updateWizardGuideModal(currentExportMode, '');
+      if ($('wizardGuideModalOverlay')) $('wizardGuideModalOverlay').hidden = false;
+      act('jy-wizard', { mode: currentExportMode }, $('jyWizard'), '录制中…');
+    };
+    if ($('jyDismissWizardGuide')) $('jyDismissWizardGuide').onclick = () => { wizardGuideDismissed = true; $('wizardGuideModalOverlay').hidden = true; };
+    if ($('jyCloseWizardGuideTop')) $('jyCloseWizardGuideTop').onclick = () => { wizardGuideDismissed = true; $('wizardGuideModalOverlay').hidden = true; };
+    if ($('jyStopWizardFromModal')) $('jyStopWizardFromModal').onclick = () => { wizardGuideDismissed = true; $('wizardGuideModalOverlay').hidden = true; act('jy-stop'); };
     $('jyScan').onclick = () => act('jy-scan', { modelKey: $('jyModelSelect').value, connection: getSelectedModelConnection() }, $('jyScan'), '识别中…');
     $('jyExport').onclick = () => act('jy-export', { index: selectedDraftIdx }, $('jyExport'), '启动导出…');
     $('jyStop').onclick = () => act('jy-stop');

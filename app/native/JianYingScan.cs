@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 internal sealed partial class JianYingEngine
@@ -81,11 +82,28 @@ internal sealed partial class JianYingEngine
     private static string JsonBody(string text)
     {
         string source = Regex.Replace((text ?? "").Trim(), @"^```(?:json)?\s*|\s*```$", "", RegexOptions.IgnoreCase | RegexOptions.Singleline);
-        int first = source.IndexOf('{'), last = source.LastIndexOf('}');
-        if (first < 0 || last <= first) throw new InvalidOperationException("AI 未返回有效 JSON。");
-        // Gemini occasionally emits literal line breaks inside JSON string values.
-        // Escape those characters without changing valid escapes or text contents.
-        source = source.Substring(first, last - first + 1);
+        int last = source.LastIndexOf('}');
+        if (last < 0) throw new InvalidOperationException("AI 未返回有效 JSON。");
+        var parser = new JavaScriptSerializer();
+        for (int first = source.LastIndexOf('{', last); first >= 0; first = source.LastIndexOf('{', first - 1))
+        {
+            string candidate = EscapeJsonStringControls(source.Substring(first, last - first + 1));
+            try
+            {
+                var data = parser.DeserializeObject(candidate) as IDictionary;
+                if (data != null && (data.Contains("coordinateSpace") || data.Contains("heading") || data.Contains("drafts") || data.Contains("error"))) return candidate;
+            }
+            catch (ArgumentException) { }
+            catch (InvalidOperationException) { }
+        }
+        int outerFirst = source.IndexOf('{');
+        if (outerFirst >= 0 && last > outerFirst)
+            return EscapeJsonStringControls(source.Substring(outerFirst, last - outerFirst + 1));
+        throw new InvalidOperationException("AI 未返回完整的草稿 JSON。");
+    }
+
+    private static string EscapeJsonStringControls(string source)
+    {
         var result = new StringBuilder(); bool quoted = false, escaped = false;
         foreach (char c in source)
         {

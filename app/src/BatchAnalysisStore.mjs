@@ -1,5 +1,5 @@
 import { createBatchAnalysisQueue } from '../shared/batch-analysis.mjs';
-import { isGeminiModel } from '../shared/script-score.mjs';
+import { isScriptAnalysisModel } from '../shared/script-score.mjs';
 import { WEB_ANALYZERS, analysisName, analysisReady, webAnalyzer } from '../shared/script-analyzers.mjs';
 import { excludeUsedMusic } from '../shared/library-usage.mjs';
 import { musicUsage } from './MusicUsage.mjs';
@@ -7,9 +7,24 @@ import { requestScriptAnalysis } from './AnalysisRequest.mjs';
 
 let providers = [], database;
 export function batchAnalyzers(items = providers) {
-  return [WEB_ANALYZERS.find(item => item.provider.webId === 'deepseek'), ...items.flatMap(provider => (provider.models || []).filter(model => isGeminiModel(provider, model)).map(model => ({ key: `${provider.id}::${model}`, provider, providerId: provider.id, model })))];
+  return [...WEB_ANALYZERS, ...items.flatMap(provider => (provider.models || []).filter(model => isScriptAnalysisModel(provider, model)).map(model => ({ key: `${provider.id}::${model}`, provider, providerId: provider.id, model })))];
 }
 export function setBatchProviders(value) { providers = value || []; }
+export function batchAnalysisProgress(state, items = providers) {
+  const progress = state.progress;
+  if (!progress?.ids?.length) return null;
+  const analyzer = batchAnalyzers(items).find(item => item.key === progress.analyzerKey);
+  if (!analyzer) return null;
+  const tasks = progress.ids.map(id => state.tasks.find(task => task.id === id)).filter(Boolean);
+  const activeIds = state.activeIds.filter(id => progress.ids.includes(id));
+  const current = state.tasks.find(task => task.id === activeIds[0]);
+  return {
+    id: `${progress.startedAt}:${progress.analyzerKey}`, model: analysisName(analyzer), status: progress.status, startedAt: progress.startedAt,
+    finishedAt: progress.finishedAt, completed: progress.completed ?? tasks.filter(task => task.status === 'complete').length,
+    failed: progress.failed ?? tasks.filter(task => task.status === 'error').length,
+    total: progress.ids.length, active: activeIds.length, firstEpisode: current?.episodeNumber || 0,
+  };
+}
 function openDatabase() {
   return database ||= new Promise((resolve, reject) => {
     if (!globalThis.indexedDB) { reject(new Error('当前环境不支持本地任务存储，请使用桌面程序。')); return; }
@@ -31,13 +46,13 @@ async function storage(write, value) {
 }
 export const batchQueue = createBatchAnalysisQueue({
   load: () => storage(false), save: value => storage(true, value),
-  async analyze(tasks, signal) {
+  async analyze(tasks, signal, recentEpisodes = []) {
     const model = batchAnalyzers().find(item => item.key === tasks[0].settings.analyzerKey);
     if (!model || !analysisReady(model)) throw new Error('此任务所选模型已移除或缺少密钥，请检查工作空间中的模型连接。');
     const catalog = await globalThis.blackObsidian?.getMusicLibrary?.() || { tracks: [], revision: '' };
     signal.throwIfAborted();
     const tracks = excludeUsedMusic(catalog.tracks, musicUsage.snapshot().history);
-    const value = await requestScriptAnalysis('batch-library-match', { segmented: !!tasks[0].settings.segmented, segmentCount: tasks[0].settings.segmentCount || 3, episodes: tasks.map(({ id, episodeNumber, title, script }) => ({ id, episodeNumber, title, script })), provider: model.provider, model: model.model, tracks: tracks.map(({ id, title }) => ({ id, title })) }, webAnalyzer(model) ? signal : AbortSignal.any([signal, AbortSignal.timeout(730000)]));
+    const value = await requestScriptAnalysis('batch-library-match', { segmented: !!tasks[0].settings.segmented, segmentCount: tasks[0].settings.segmentCount || 3, episodes: tasks.map(({ id, episodeNumber, title, script }) => ({ id, episodeNumber, title, script })), recentEpisodes, provider: model.provider, model: model.model, tracks: tracks.map(({ id, title }) => ({ id, title })) }, webAnalyzer(model) ? signal : AbortSignal.any([signal, AbortSignal.timeout(730000)]));
     signal.throwIfAborted();
     const titleMatches = matches => (matches || []).map(match => ({ ...match, title: catalog.tracks.find(track => track.id === match.id)?.title || match.id }));
     return value.episodes.map(episode => ({ id: episode.id, value: { ...episode.value, matches: titleMatches(episode.value.matches), ...(episode.value.segments ? {segments:episode.value.segments.map(segment=>({...segment,matches:titleMatches(segment.matches)}))} : {}) }, revision: catalog.revision, analyzer: analysisName(model) }));

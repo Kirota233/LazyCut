@@ -55,6 +55,53 @@ namespace XMStudioHost
         public static extern bool ReleaseCapture();
 
         [DllImport("user32.dll")]
+        public static extern bool GetCursorPos(out Point lpPoint);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr WindowFromPoint(Point point);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("kernel32.dll")]
+        public static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        public const int SW_SHOWNOACTIVATE = 4;
+
+        public static void ReleaseWebViewCapture()
+        {
+            try
+            {
+                Point pt;
+                if (GetCursorPos(out pt))
+                {
+                    IntPtr hWnd = WindowFromPoint(pt);
+                    if (hWnd != IntPtr.Zero)
+                    {
+                        uint pid;
+                        uint targetTid = GetWindowThreadProcessId(hWnd, out pid);
+                        uint curTid = GetCurrentThreadId();
+                        if (targetTid != 0 && targetTid != curTid)
+                        {
+                            AttachThreadInput(curTid, targetTid, true);
+                            try { ReleaseCapture(); }
+                            finally { AttachThreadInput(curTid, targetTid, false); }
+                            return;
+                        }
+                    }
+                }
+            }
+            catch { }
+            try { ReleaseCapture(); } catch { }
+        }
+
+        [DllImport("user32.dll")]
         public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
@@ -1703,9 +1750,230 @@ namespace XMStudioHost
         }
     }
 
+    internal sealed class RecordingGuidePopupForm : Form
+    {
+        private readonly Label _titleLabel;
+        private readonly Label _modeLabel;
+        private readonly Label _bannerLabel;
+        private readonly Panel _stepsContainer;
+        private readonly Label[] _stepLabels = new Label[4];
+        private string _mode = "return_home";
+        private string _guideText = "";
+        public Action OnDismiss;
+        public Action OnStopRecording;
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        public RecordingGuidePopupForm(Icon appIcon)
+        {
+            Text = "录制坐标 · 操作步骤提醒";
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            Size = new Size(420, 345);
+            BackColor = Color.FromArgb(15, 19, 26);
+            ForeColor = Color.FromArgb(241, 245, 249);
+            if (appIcon != null) Icon = appIcon;
+            Win32.EnableRoundedAndDark(Handle, false);
+
+            var root = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(16, 14, 16, 14),
+                BackColor = Color.FromArgb(15, 19, 26),
+            };
+            root.Paint += (s, e) =>
+            {
+                using (var pen = new Pen(Color.FromArgb(140, 240, 185, 82), 1.5f))
+                {
+                    e.Graphics.DrawRectangle(pen, 0, 0, root.Width - 1, root.Height - 1);
+                }
+            };
+            Controls.Add(root);
+
+            _titleLabel = new Label
+            {
+                Text = "🎯 录制坐标 · 操作步骤提醒",
+                Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(255, 207, 110),
+                Location = new Point(16, 12),
+                Size = new Size(340, 24),
+                Cursor = Cursors.SizeAll,
+            };
+            var closeTopBtn = new Button
+            {
+                Text = "✕",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                BackColor = Color.FromArgb(24, 30, 40),
+                Location = new Point(374, 10),
+                Size = new Size(30, 26),
+                Cursor = Cursors.Hand,
+                TabStop = false,
+            };
+            closeTopBtn.FlatAppearance.BorderColor = Color.FromArgb(51, 65, 85);
+            closeTopBtn.Click += (s, e) => { if (OnDismiss != null) OnDismiss(); };
+
+            _modeLabel = new Label
+            {
+                Text = "当前模式：收起至首页 · 后台 (3步)  |  热键：F8 采点 · F10 中断",
+                Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular),
+                ForeColor = Color.FromArgb(148, 163, 184),
+                Location = new Point(16, 38),
+                Size = new Size(388, 18),
+                Cursor = Cursors.SizeAll,
+            };
+
+            _bannerLabel = new Label
+            {
+                Text = "准备就绪：请先打开任意一个剪映草稿进入编辑界面，将鼠标移到目标按钮上按 F8 采集。",
+                Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(254, 240, 138),
+                BackColor = Color.FromArgb(38, 33, 22),
+                Location = new Point(16, 62),
+                Size = new Size(388, 44),
+                Padding = new Padding(8, 6, 8, 6),
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
+
+            _stepsContainer = new Panel
+            {
+                Location = new Point(16, 114),
+                Size = new Size(388, 172),
+                BackColor = Color.Transparent,
+            };
+            for (int i = 0; i < 4; i++)
+            {
+                var lbl = new Label
+                {
+                    Location = new Point(0, i * 42),
+                    Size = new Size(388, 38),
+                    Font = new Font("Microsoft YaHei UI", 8.75f, FontStyle.Regular),
+                    Padding = new Padding(8, 4, 8, 4),
+                    TextAlign = ContentAlignment.MiddleLeft,
+                };
+                _stepLabels[i] = lbl;
+                _stepsContainer.Controls.Add(lbl);
+            }
+
+            var stopBtn = new Button
+            {
+                Text = "中断录制 (F10)",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(252, 165, 165),
+                BackColor = Color.FromArgb(60, 24, 30),
+                Location = new Point(16, 294),
+                Size = new Size(140, 34),
+                Cursor = Cursors.Hand,
+                TabStop = false,
+            };
+            stopBtn.FlatAppearance.BorderColor = Color.FromArgb(185, 60, 70);
+            stopBtn.Click += (s, e) => { if (OnStopRecording != null) OnStopRecording(); };
+
+            var okBtn = new Button
+            {
+                Text = "我知道了（关闭提醒窗，继续按 F8）",
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(20, 16, 8),
+                BackColor = Color.FromArgb(240, 185, 82),
+                Location = new Point(166, 294),
+                Size = new Size(238, 34),
+                Cursor = Cursors.Hand,
+                TabStop = false,
+            };
+            okBtn.FlatAppearance.BorderColor = Color.FromArgb(255, 207, 110);
+            okBtn.Click += (s, e) => { if (OnDismiss != null) OnDismiss(); };
+
+            MouseEventHandler dragHandler = (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    Win32.ReleaseCapture();
+                    Win32.SendMessage(Handle, Win32.WM_NCLBUTTONDOWN, (IntPtr)Win32.HTCAPTION, IntPtr.Zero);
+                }
+            };
+            root.MouseDown += dragHandler;
+            _titleLabel.MouseDown += dragHandler;
+            _modeLabel.MouseDown += dragHandler;
+
+            root.Controls.Add(_titleLabel);
+            root.Controls.Add(closeTopBtn);
+            root.Controls.Add(_modeLabel);
+            root.Controls.Add(_bannerLabel);
+            root.Controls.Add(_stepsContainer);
+            root.Controls.Add(stopBtn);
+            root.Controls.Add(okBtn);
+
+            UpdateContent("return_home", "");
+        }
+
+        public void UpdateContent(string mode, string guideText)
+        {
+            _mode = string.IsNullOrEmpty(mode) ? "return_home" : mode;
+            _guideText = guideText ?? "";
+            bool isWait = _mode == "wait_close";
+            _modeLabel.Text = isWait
+                ? "当前模式：等待完成 · 逐个 (共 4 步)  |  热键：F8 采点 · F10 中断"
+                : "当前模式：收起至首页 · 后台 (共 3 步)  |  热键：F8 采点 · F10 中断";
+
+            _bannerLabel.Text = !string.IsNullOrEmpty(_guideText)
+                ? "当前提示：" + _guideText
+                : "准备就绪：请先随便打开一个剪映草稿进入编辑界面，将鼠标悬停在目标按钮上按 F8 逐步采集。";
+
+            string[] steps = isWait
+                ? new[]
+                {
+                    "步骤 1/4：在剪映编辑界面，鼠标移到右上角「导出」按钮上，按 F8",
+                    "步骤 2/4：打开导出设置弹窗后，鼠标移到右下角「导出」确认按钮上，按 F8",
+                    "步骤 3/4：开始导出并等待完成出现「关闭」按钮后，鼠标移到「关闭」上，按 F8",
+                    "步骤 4/4：回到剪映编辑界面后，鼠标移到右上角「×（关闭草稿回首页）」上，按 F8"
+                }
+                : new[]
+                {
+                    "步骤 1/3：在剪映编辑界面，鼠标移到右上角「导出」按钮上，按 F8",
+                    "步骤 2/3：打开导出设置弹窗后，鼠标移到右下角「导出」确认按钮上，按 F8",
+                    "步骤 3/3：点击确认导出后，鼠标移到导出进度弹窗的「收起至首页」按钮上，按 F8"
+                };
+
+            int activeIdx = 0;
+            var m = Regex.Match(_guideText, @"步骤\s*(\d+)\s*/\s*(\d+)");
+            if (m.Success)
+            {
+                int parsed;
+                if (int.TryParse(m.Groups[1].Value, out parsed)) activeIdx = Math.Max(0, parsed - 1);
+            }
+
+            for (int i = 0; i < 4; i++)
+            {
+                var lbl = _stepLabels[i];
+                if (i >= steps.Length)
+                {
+                    lbl.Visible = false;
+                    continue;
+                }
+                lbl.Visible = true;
+                bool isCur = i == activeIdx;
+                bool isDone = i < activeIdx;
+                string prefix = isDone ? "✓ " : (isCur ? "👉 " : "• ");
+                lbl.Text = prefix + steps[i];
+                lbl.Font = new Font("Microsoft YaHei UI", 8.75f, isCur ? FontStyle.Bold : FontStyle.Regular);
+                lbl.ForeColor = isCur
+                    ? Color.FromArgb(255, 207, 110)
+                    : (isDone ? Color.FromArgb(110, 231, 183) : Color.FromArgb(203, 213, 225));
+                lbl.BackColor = isCur
+                    ? Color.FromArgb(46, 38, 22)
+                    : (isDone ? Color.FromArgb(18, 42, 34) : Color.FromArgb(22, 28, 38));
+            }
+        }
+    }
+
     internal sealed class StudioAppContext : ApplicationContext
     {
-        public const string CurrentVersion = "1.8.0";
+        public const string CurrentVersion = "1.8.1";
         public const int AppPort = 37651;
         private readonly string _baseDir;
         private readonly string _userDataDir;
@@ -1721,6 +1989,8 @@ namespace XMStudioHost
         private LayeredPetOrbForm _orbForm;
         private Form _panelForm;
         private WebView2 _panelWebView;
+        private RecordingGuidePopupForm _recordingPopupForm;
+        private bool _recordingPopupDismissed = false;
         private NotifyIcon _tray;
         private System.Windows.Forms.Timer _companionTimer;
 
@@ -1772,6 +2042,7 @@ namespace XMStudioHost
         // Music Library state
         private List<string> _musicRoots = new List<string>();
         private readonly ConcurrentDictionary<string, string> _musicIdToPath = new ConcurrentDictionary<string, string>();
+        private readonly ConcurrentDictionary<string, string> _downloadedUrlToPath = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, string> _dragTokens = new ConcurrentDictionary<string, string>();
         private Dictionary<string, object> _musicCatalog = new Dictionary<string, object>
         {
@@ -1845,31 +2116,25 @@ namespace XMStudioHost
                     {
                         _lastJianyingState = (Dictionary<string, object>)ev["state"];
                         SendEventToMain("bos:jianying-state", _lastJianyingState);
-                        if (!IsJianyingBusy()) RestorePanelAfterScan();
+                        SyncRecordingPopupFromState();
                         BroadcastCompanionState();
                     }
                     else if (evName == "minimize")
                     {
-                        HidePanelForScan(true);
+                        // 任何情况下（包括截图识别、录制坐标、批量导出）均不自动隐藏悬浮窗
                     }
                     else if (evName == "scan-capture" && ev.ContainsKey("id"))
                     {
-                        // 截图前临时隐藏悬浮面板，避免挡住剪映首页的草稿缩略图。
                         object capId = ev["id"];
-                        Task.Run(async () =>
+                        var unused = _jianyingRpc.CallAsync(new Dictionary<string, object>
                         {
-                            HidePanelForScan(true);
-                            await Task.Delay(120);
-                            var unused = _jianyingRpc.CallAsync(new Dictionary<string, object>
-                            {
-                                { "action", "scan_capture_ready" },
-                                { "args", new Dictionary<string, object> { { "id", capId }, { "error", "" } } }
-                            });
+                            { "action", "scan_capture_ready" },
+                            { "args", new Dictionary<string, object> { { "id", capId }, { "error", "" } } }
                         });
                     }
                     else if (evName == "scan-captured")
                     {
-                        RestorePanelAfterScan();
+                        // 悬浮窗保持常驻，无需恢复
                     }
                     else if (evName == "extract-progress")
                     {
@@ -1900,16 +2165,24 @@ namespace XMStudioHost
                     {
                         string msg = ev.ContainsKey("message") ? Convert.ToString(ev["message"]) : "";
                         string stage = ev.ContainsKey("stage") ? Convert.ToString(ev["stage"]) : "";
-                        if (!string.IsNullOrEmpty(msg))
+                        string mode = _lastJianyingState != null && _lastJianyingState.ContainsKey("mode")
+                            ? Convert.ToString(_lastJianyingState["mode"])
+                            : "return_home";
+                        RunOnUi(() =>
                         {
-                            RunOnUi(() =>
+                            if (!string.IsNullOrEmpty(msg) && _orbForm != null && !_orbForm.IsDisposed)
                             {
-                                if (_orbForm != null && !_orbForm.IsDisposed)
-                                {
-                                    _orbForm.SwitchGif(stage == "complete" ? "enjoy" : "play", msg, stage == "complete" ? 5000 : 12000);
-                                }
-                            }, false);
-                        }
+                                _orbForm.SwitchGif(stage == "complete" ? "enjoy" : "play", msg, stage == "complete" ? 5000 : 12000);
+                            }
+                            if (stage == "complete" || stage == "error" || stage == "cancelled")
+                            {
+                                HideRecordingPopup();
+                            }
+                            else
+                            {
+                                ShowOrUpdateRecordingPopup(mode, msg, false);
+                            }
+                        }, false);
                         var unused = RefreshJianyingStatusAsync();
                     }
                     else if (evName == "export-progress")
@@ -2135,7 +2408,7 @@ namespace XMStudioHost
 
             try
             {
-                object result = await DispatchCommandAsync(cmd, payload);
+                object result = await DispatchCommandAsync(senderWv, cmd, payload);
                 ReplyBridge(senderWv, id, result, null);
             }
             catch (Exception ex)
@@ -2162,7 +2435,7 @@ namespace XMStudioHost
             catch { }
         }
 
-        private async Task<object> DispatchCommandAsync(string cmd, Dictionary<string, object> payload)
+        private async Task<object> DispatchCommandAsync(WebView2 senderWv, string cmd, Dictionary<string, object> payload)
         {
             switch (cmd)
             {
@@ -2268,28 +2541,46 @@ namespace XMStudioHost
                     }
                 case "prepare-music-drag":
                     {
-                        string trackId = payload.ContainsKey("trackId") ? Convert.ToString(payload["trackId"]) : "";
-                        string path;
-                        if (!string.IsNullOrEmpty(trackId) && _musicIdToPath.TryGetValue(trackId, out path) && File.Exists(path))
+                        string path = ResolveMusicDragPath(payload);
+                        if (!string.IsNullOrEmpty(path) && File.Exists(path))
                         {
                             string token = Guid.NewGuid().ToString("N");
                             _dragTokens[token] = path;
-                            return new Dictionary<string, object> { { "token", token }, { "fileName", Path.GetFileName(path) } };
+                            string fileName = Path.GetFileName(path);
+                            return new Dictionary<string, object>
+                            {
+                                { "ready", true },
+                                { "token", token },
+                                { "path", path },
+                                { "name", fileName },
+                                { "fileName", fileName }
+                            };
                         }
-                        throw new Exception("未找到可拖动的本地音频文件");
+                        return new Dictionary<string, object> { { "ready", false } };
                     }
                 case "start-music-drag":
                     {
                         string token = payload.ContainsKey("token") ? Convert.ToString(payload["token"]) : "";
                         string file;
-                        if (_dragTokens.TryGetValue(token, out file) && File.Exists(file))
+                        if (string.IsNullOrEmpty(token) || !_dragTokens.TryGetValue(token, out file) || !File.Exists(file))
                         {
-                            _mainForm.BeginInvoke(new Action(() =>
-                            {
-                                var data = new DataObject(DataFormats.FileDrop, new string[] { file });
-                                _mainForm.DoDragDrop(data, DragDropEffects.Copy);
-                            }));
+                            SendEventToWebView(senderWv ?? _mainWebView, "bos:music-drag-error", "音频文件已移动或删除，请刷新音乐库后重试。");
+                            return new Dictionary<string, object> { { "ok", false } };
                         }
+                        RunOnUi(() =>
+                        {
+                            try
+                            {
+                                Win32.ReleaseWebViewCapture();
+                                var data = new DataObject(DataFormats.FileDrop, new string[] { file });
+                                Control hostCtrl = (senderWv != null && !senderWv.IsDisposed) ? (Control)senderWv : _mainForm;
+                                hostCtrl.DoDragDrop(data, DragDropEffects.Copy);
+                            }
+                            catch (Exception ex)
+                            {
+                                SendEventToWebView(senderWv ?? _mainWebView, "bos:music-drag-error", ex.Message ?? "音乐拖拽启动失败");
+                            }
+                        }, true);
                         return new Dictionary<string, object> { { "ok", true } };
                     }
                 case "download-audio":
@@ -2719,6 +3010,18 @@ namespace XMStudioHost
             var args = payload.ContainsKey("args") && payload["args"] is Dictionary<string, object>
                 ? new Dictionary<string, object>((Dictionary<string, object>)payload["args"])
                 : new Dictionary<string, object>();
+            if (action == "wizard")
+            {
+                string mode = args.ContainsKey("mode")
+                    ? Convert.ToString(args["mode"])
+                    : (_lastJianyingState != null && _lastJianyingState.ContainsKey("mode") ? Convert.ToString(_lastJianyingState["mode"]) : "return_home");
+                _recordingPopupDismissed = false;
+                RunOnUi(() => ShowOrUpdateRecordingPopup(mode, "", true), false);
+            }
+            else if (action == "stop")
+            {
+                RunOnUi(() => HideRecordingPopup(), false);
+            }
             var req = new Dictionary<string, object>
             {
                 { "action", action },
@@ -2733,9 +3036,67 @@ namespace XMStudioHost
             {
                 _lastJianyingState = res;
             }
+            SyncRecordingPopupFromState();
             SendEventToMain("bos:jianying-state", _lastJianyingState);
             BroadcastCompanionState();
             return _lastJianyingState;
+        }
+
+        private void ShowOrUpdateRecordingPopup(string mode, string guideText, bool forceShow)
+        {
+            if (_recordingPopupDismissed && !forceShow) return;
+            if (_recordingPopupForm == null || _recordingPopupForm.IsDisposed)
+            {
+                _recordingPopupForm = new RecordingGuidePopupForm(LoadAppIcon());
+                _recordingPopupForm.OnDismiss = () =>
+                {
+                    _recordingPopupDismissed = true;
+                    HideRecordingPopup();
+                };
+                _recordingPopupForm.OnStopRecording = () =>
+                {
+                    _recordingPopupDismissed = true;
+                    HideRecordingPopup();
+                    var unused = HandleJianyingActionAsync(new Dictionary<string, object> { { "action", "stop" } });
+                };
+                var area = (_orbForm != null && !_orbForm.IsDisposed)
+                    ? Screen.FromControl(_orbForm).WorkingArea
+                    : Screen.PrimaryScreen.WorkingArea;
+                int x = area.Left + (area.Width - _recordingPopupForm.Width) / 2;
+                int y = Math.Max(area.Top + 24, area.Top + (area.Height - _recordingPopupForm.Height) / 5);
+                _recordingPopupForm.Location = new Point(x, y);
+            }
+            _recordingPopupForm.UpdateContent(mode, guideText);
+            if (!_recordingPopupForm.Visible)
+            {
+                Win32.ShowWindow(_recordingPopupForm.Handle, Win32.SW_SHOWNOACTIVATE);
+            }
+        }
+
+        private void HideRecordingPopup()
+        {
+            if (_recordingPopupForm != null && !_recordingPopupForm.IsDisposed && _recordingPopupForm.Visible)
+            {
+                _recordingPopupForm.Hide();
+            }
+        }
+
+        private void SyncRecordingPopupFromState()
+        {
+            var jy = _lastJianyingState;
+            if (jy == null) return;
+            bool rec = jy.ContainsKey("recording") && Convert.ToBoolean(jy["recording"]);
+            string mode = jy.ContainsKey("mode") ? Convert.ToString(jy["mode"]) : "return_home";
+            string guide = jy.ContainsKey("guide") ? Convert.ToString(jy["guide"]) : "";
+            RunOnUi(() =>
+            {
+                if (rec) ShowOrUpdateRecordingPopup(mode, guide, false);
+                else
+                {
+                    _recordingPopupDismissed = false;
+                    HideRecordingPopup();
+                }
+            }, false);
         }
 
         private string[] ChooseJianyingFiles()
@@ -3532,71 +3893,118 @@ namespace XMStudioHost
 
         private void HidePanelForScan(bool wait)
         {
-            RunOnUi(() =>
-            {
-                if (_panelForm != null && !_panelForm.IsDisposed && _panelForm.Visible)
-                {
-                    _panelHiddenForScan = true;
-                    _panelForm.Hide();
-                }
-            }, wait);
+            // 任何情况下（无论是截图识别、录制坐标还是批量导出）均不自动隐藏悬浮窗
+            _panelHiddenForScan = false;
         }
 
         private void RestorePanelAfterScan()
         {
-            if (!_panelHiddenForScan) return;
-            RunOnUi(() =>
-            {
-                if (!_panelHiddenForScan) return;
-                _panelHiddenForScan = false;
-                if (_panelOpen && _companionVisible && _panelForm != null && !_panelForm.IsDisposed)
-                {
-                    PlaceCompanionPanel();
-                    _panelForm.Show();
-                }
-            }, false);
+            _panelHiddenForScan = false;
         }
 
-        // ======================== Music Library & Materials ========================
-        private Dictionary<string, object> ScanMusicLibrary()
+        private string ResolveMusicDragPath(Dictionary<string, object> payload)
         {
-            var dirs = new List<Dictionary<string, object>>();
-            var tracks = new List<Dictionary<string, object>>();
-            _musicIdToPath.Clear();
-            var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg" };
-
-            foreach (string root in _musicRoots.ToArray())
+            if (payload == null) return null;
+            string[] idKeys = new[] { "libraryId", "trackId", "id" };
+            foreach (string key in idKeys)
             {
-                string libId = Sha256Hex(root.ToLowerInvariant());
-                int count = 0;
-                string err = "";
-                try
+                if (payload.ContainsKey(key) && payload[key] != null)
                 {
-                    if (Directory.Exists(root))
+                    string idVal = Convert.ToString(payload[key]).Trim();
+                    string foundPath;
+                    if (!string.IsNullOrEmpty(idVal) && _musicIdToPath.TryGetValue(idVal, out foundPath) && File.Exists(foundPath))
                     {
-                        foreach (string file in Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories))
+                        return foundPath;
+                    }
+                }
+            }
+            string[] pathKeys = new[] { "filePath", "path" };
+            var allowedExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg" };
+            foreach (string key in pathKeys)
+            {
+                if (payload.ContainsKey(key) && payload[key] != null)
+                {
+                    string rawPath = Convert.ToString(payload[key]).Trim();
+                    if (!string.IsNullOrEmpty(rawPath))
+                    {
+                        try
                         {
-                            if (!exts.Contains(Path.GetExtension(file))) continue;
-                            string id = Sha256Hex(file.ToLowerInvariant());
-                            var fi = new FileInfo(file);
-                            _musicIdToPath[id] = file;
-                            tracks.Add(new Dictionary<string, object>
+                            string full = Path.GetFullPath(rawPath);
+                            if (File.Exists(full) && allowedExts.Contains(Path.GetExtension(full)))
                             {
-                                { "id", id },
-                                { "libraryId", libId },
-                                { "title", Path.GetFileNameWithoutExtension(file) },
-                                { "relativePath", file.Substring(root.Length).TrimStart('\\', '/') },
-                                { "size", fi.Length },
-                                { "modifiedAt", (long)(fi.LastWriteTimeUtc - new DateTime(1970, 1, 1)).TotalMilliseconds }
-                            });
-                            count++;
-                            if (tracks.Count >= 5000) break;
+                                return full;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            if (payload.ContainsKey("url") && payload["url"] != null)
+            {
+                string rawUrl = Convert.ToString(payload["url"]).Trim();
+                if (!string.IsNullOrEmpty(rawUrl))
+                {
+                    string dlPath;
+                    if (_downloadedUrlToPath.TryGetValue(rawUrl, out dlPath) && File.Exists(dlPath))
+                    {
+                        return dlPath;
+                    }
+                    var m = Regex.Match(rawUrl, @"/local-music/([a-fA-F0-9]{16,128})");
+                    if (m.Success)
+                    {
+                        string localId = m.Groups[1].Value.ToLowerInvariant();
+                        string localPath;
+                        if (_musicIdToPath.TryGetValue(localId, out localPath) && File.Exists(localPath))
+                        {
+                            return localPath;
                         }
                     }
                 }
-                catch (Exception ex) { err = ex.Message; }
-                dirs.Add(new Dictionary<string, object> { { "id", libId }, { "path", root }, { "count", count }, { "error", err } });
             }
+            return null;
+        }
+
+        // ======================== Music Library & Materials ========================
+        private static string MusicTitle(string file)
+        {
+            string title = (Path.GetFileNameWithoutExtension(file) ?? "").Trim();
+            if (title.Length == 0) title = Path.GetFileName(file) ?? "music";
+            return title.Substring(0, Math.Min(title.Length, 240));
+        }
+
+        private Dictionary<string, object> ScanMusicLibrary()
+        {
+            var roots = _musicRoots.ToArray();
+            var dirs = new List<Dictionary<string, object>>();
+            var tracks = new List<Dictionary<string, object>>();
+            _musicIdToPath.Clear();
+            var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".webm" };
+            int visited = 0, skipped = 0;
+
+            foreach (string root in roots)
+            {
+                dirs.Add(new Dictionary<string, object>
+                {
+                    { "id", Sha256Hex(root.ToLowerInvariant()) },
+                    { "path", root },
+                    { "count", 0 },
+                    { "error", "" }
+                });
+            }
+
+            for (int pass = 0; pass < 2 && tracks.Count < 5000 && visited < 50000 && roots.Length > 0; pass++)
+            {
+                for (int at = 0; at < roots.Length && tracks.Count < 5000 && visited < 50000; at++)
+                {
+                    int quota = pass == 0 ? 5000 / roots.Length + (at < 5000 % roots.Length ? 1 : 0) : 5000;
+                    int visitLimit = pass == 0 ? Math.Min(50000, visited + Math.Max(1, 50000 / roots.Length)) : 50000;
+                    ScanMusicRoot(roots[at], dirs[at], tracks, exts, quota, visitLimit, ref visited, ref skipped);
+                }
+            }
+
+            string warning = tracks.Count >= 5000 || visited >= 50000
+                ? "扫描达到范围限制；各文件夹的收录数量见下方，可连接更具体的目录。"
+                : skipped > 0 ? skipped + " 个无法访问项目或链接已跳过。" : "";
 
             _musicCatalog = new Dictionary<string, object>
             {
@@ -3604,9 +4012,87 @@ namespace XMStudioHost
                 { "tracks", tracks.ToArray() },
                 { "scannedAt", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() },
                 { "revision", Guid.NewGuid().ToString("N").Substring(0, 12) },
-                { "warning", "" }
+                { "warning", warning }
             };
             return _musicCatalog;
+        }
+
+        private void ScanMusicRoot(
+            string root,
+            Dictionary<string, object> info,
+            List<Dictionary<string, object>> tracks,
+            HashSet<string> exts,
+            int quota,
+            int visitLimit,
+            ref int visited,
+            ref int skipped)
+        {
+            int count = Convert.ToInt32(info["count"]);
+            if (count >= quota || Convert.ToString(info["error"]).Length > 0) return;
+            string libId = Convert.ToString(info["id"]);
+            try
+            {
+                if (!Directory.Exists(root))
+                {
+                    info["error"] = "无法读取音乐文件夹：目录不存在";
+                    return;
+                }
+                var stack = new Queue<Tuple<string, int>>();
+                stack.Enqueue(Tuple.Create(root, 0));
+                while (stack.Count > 0 && count < quota && tracks.Count < 5000 && visited < visitLimit)
+                {
+                    var dir = stack.Dequeue();
+                    string[] files;
+                    try
+                    {
+                        files = Directory.GetFileSystemEntries(dir.Item1);
+                        Array.Sort(files, StringComparer.CurrentCulture);
+                    }
+                    catch
+                    {
+                        if (dir.Item1 == root) throw;
+                        skipped++;
+                        continue;
+                    }
+                    foreach (string file in files)
+                    {
+                        if (count >= quota || tracks.Count >= 5000 || visited >= visitLimit) break;
+                        visited++;
+                        try
+                        {
+                            var attrs = File.GetAttributes(file);
+                            if ((attrs & FileAttributes.ReparsePoint) != 0) { skipped++; continue; }
+                            if ((attrs & FileAttributes.Directory) != 0)
+                            {
+                                if (dir.Item2 < 12) stack.Enqueue(Tuple.Create(file, dir.Item2 + 1));
+                                continue;
+                            }
+                            if (!exts.Contains(Path.GetExtension(file))) continue;
+                            string full = Path.GetFullPath(file);
+                            string id = Sha256Hex(full.ToLowerInvariant());
+                            if (_musicIdToPath.ContainsKey(id)) continue;
+                            var fi = new FileInfo(full);
+                            _musicIdToPath[id] = full;
+                            tracks.Add(new Dictionary<string, object>
+                            {
+                                { "id", id },
+                                { "libraryId", libId },
+                                { "title", MusicTitle(full) },
+                                { "relativePath", full.Substring(root.TrimEnd('\\', '/').Length).TrimStart('\\', '/') },
+                                { "size", fi.Length },
+                                { "modifiedAt", (long)(fi.LastWriteTimeUtc - new DateTime(1970, 1, 1)).TotalMilliseconds }
+                            });
+                            count++;
+                        }
+                        catch { skipped++; }
+                    }
+                }
+                info["count"] = count;
+            }
+            catch (Exception ex)
+            {
+                info["error"] = "无法读取音乐文件夹：" + ex.Message;
+            }
         }
 
         private Dictionary<string, object> DownloadAudioFile(Dictionary<string, object> payload)
@@ -3623,6 +4109,7 @@ namespace XMStudioHost
             {
                 wc.DownloadFile(url, outPath);
             }
+            if (!string.IsNullOrEmpty(url)) _downloadedUrlToPath[url] = outPath;
             return new Dictionary<string, object> { { "ok", true }, { "path", outPath }, { "audioPath", outPath }, { "kind", "audio" } };
         }
 
@@ -3866,6 +4353,7 @@ namespace XMStudioHost
             try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); } } catch { }
             try { if (_orbForm != null) _orbForm.Close(); } catch { }
             try { if (_panelForm != null) _panelForm.Close(); } catch { }
+            try { if (_recordingPopupForm != null) _recordingPopupForm.Close(); } catch { }
             try { if (_jianyingRpc != null) _jianyingRpc.Dispose(); } catch { }
             try { if (_watermarkRpc != null) _watermarkRpc.Dispose(); } catch { }
             try { if (_server != null) _server.Dispose(); } catch { }

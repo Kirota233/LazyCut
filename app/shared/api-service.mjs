@@ -1,14 +1,22 @@
 import { normalizeMusicOptions, buildSunoBody } from '../shared/music-options.mjs';
 import { getSunoSongs } from '../server/suno-response.mjs';
-import { isGeminiModel, scoreMessages, parseScoreResponse, validateScoreRequest } from '../shared/script-score.mjs';
+import { isScriptAnalysisModel, scoreMessages, parseScoreResponse, validateScoreRequest } from '../shared/script-score.mjs';
 import { validateLibraryInput, keywordMessages, parseKeywords, shortlistTracks, matchMessages, parseMatches } from '../shared/library-match.mjs';
 import { analyzeWithWeb } from '../shared/web-script-analysis.mjs';
 import { analyzeBatchMusic } from '../shared/batch-music.mjs';
 import { segmentMessages, parseSegments, planSegments, segmentCandidates, segmentMatchMessages, parseSegmentMatches } from '../shared/script-segments.mjs';
 
+const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 
 // Protocol and validation are shared by the legacy server and the native renderer.
 export function createApiService(fetch = globalThis.fetch) {
+function providerBaseUrl(provider) {
+  if (provider?.protocol === 'deepseek') return DEEPSEEK_BASE_URL;
+  return provider?.protocol === 'gemini' && !provider.baseUrl?.trim()
+    ? DEFAULT_GEMINI_BASE_URL : provider?.baseUrl;
+}
+
 function normalizeBaseUrl(value) {
   if (typeof value !== "string" || !value.trim()) {
     throw Object.assign(new Error("请先填写 Base URL。"), { status: 400 });
@@ -47,10 +55,71 @@ function validateProvider(provider, model, allowSuno = false) {
   if (provider.protocol === "suno" && !allowSuno) {
     throw Object.assign(new Error("Suno 是音乐生成协议，请在音乐工作台中使用。"), { status: 400 });
   }
-  if (provider.protocol === "gemini" && (!provider.baseUrl || !String(provider.baseUrl).trim())) {
-    provider.baseUrl = "https://generativelanguage.googleapis.com/v1beta";
+  normalizeBaseUrl(providerBaseUrl(provider));
+}
+
+function compareGeminiModels(a, b) {
+  const getVer = s => {
+    const m = s.match(/gemini-(\d+(?:\.\d+)?)/i);
+    return m ? parseFloat(m[1]) : 0;
+  };
+  const verA = getVer(a);
+  const verB = getVer(b);
+  if (verA !== verB) return verB - verA;
+  const isLiteA = /-lite/i.test(a);
+  const isLiteB = /-lite/i.test(b);
+  if (isLiteA !== isLiteB) return isLiteA ? 1 : -1;
+  const isFlashA = /flash/i.test(a);
+  const isFlashB = /flash/i.test(b);
+  if (isFlashA !== isFlashB) return isFlashA ? -1 : 1;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+async function requestProviderModels(provider) {
+  if (!provider || typeof provider !== 'object') {
+    throw Object.assign(new Error('找不到供应商配置。'), { status: 400 });
   }
-  normalizeBaseUrl(provider.baseUrl);
+  if (!provider.apiKey?.trim()) {
+    throw Object.assign(new Error('请先填写 API 密钥。'), { status: 400 });
+  }
+  const protocol = provider.protocol || 'openai';
+  if (!['gemini', 'deepseek', 'openai', 'custom', 'anthropic'].includes(protocol)) {
+    throw Object.assign(new Error('此协议不提供模型列表，请手动添加模型 ID。'), { status: 400 });
+  }
+  const url = endpointUrl(providerBaseUrl(provider), '/models');
+  const headers = protocol === 'gemini'
+    ? { 'x-goog-api-key': provider.apiKey }
+    : protocol === 'anthropic'
+      ? { 'x-api-key': provider.apiKey, 'anthropic-version': '2023-06-01' }
+      : { Authorization: `Bearer ${provider.apiKey}` };
+  const entries = [];
+  let pageToken = '';
+  for (let page = 0; page < 10; page++) {
+    const pageUrl = new URL(url);
+    if (protocol === 'gemini') {
+      pageUrl.searchParams.set('pageSize', '1000');
+      if (pageToken) pageUrl.searchParams.set('pageToken', pageToken);
+    }
+    const response = await fetch(pageUrl, { method: 'GET', headers, signal: AbortSignal.timeout(30_000) });
+    const { payload } = await readUpstreamResponse(response, provider.apiKey, '拉取模型列表失败');
+    entries.push(...(Array.isArray(payload?.models) ? payload.models : Array.isArray(payload?.data) ? payload.data : []));
+    pageToken = protocol === 'gemini' ? String(payload?.nextPageToken || '') : '';
+    if (!pageToken) break;
+  }
+  const models = entries.filter(entry => {
+    if (protocol !== 'gemini') return true;
+    return !Array.isArray(entry?.supportedGenerationMethods) || entry.supportedGenerationMethods.includes('generateContent');
+  }).map(entry => typeof entry === 'string' ? entry : entry?.name || entry?.id || '')
+    .map(name => String(name).replace(/^models\//, ''))
+    .filter(name => protocol === 'gemini'
+      ? /^gemini-/i.test(name) && !/embedding|embed|imagen|image|tts|whisper|audio-only/i.test(name)
+      : name && !/embedding|embed|tts|whisper/i.test(name));
+  if (protocol === 'gemini') {
+    models.sort(compareGeminiModels);
+  } else if (protocol === 'openai' || protocol === 'custom') {
+    models.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+  }
+  return [...new Set(models)];
 }
 
 function isSunoTaskModel(model) {
@@ -150,7 +219,7 @@ async function requestSunoModelTest(provider, model) {
 function buildProviderRequest(provider, model, messages, structured = false) {
   const protocol = provider.protocol || "openai";
   const url = endpointUrl(
-    provider.baseUrl,
+    providerBaseUrl(provider),
     protocol === "anthropic"
       ? "/messages"
       : protocol === "gemini"
@@ -183,7 +252,7 @@ function buildProviderRequest(provider, model, messages, structured = false) {
     };
   } else {
     headers.Authorization = `Bearer ${provider.apiKey}`;
-    body = { model, messages };
+    body = { model, messages, ...(protocol === 'deepseek' ? { max_tokens: 8192 } : {}) };
   }
 
   return { url, headers, body };
@@ -464,103 +533,11 @@ async function querySunoMusic(provider, model, ids) {
 }
 
 
-function compareGeminiModels(a, b) {
-  const getVer = (s) => {
-    const m = s.match(/gemini-(\d+(?:\.\d+)?)/i);
-    return m ? parseFloat(m[1]) : 0;
-  };
-  const verA = getVer(a);
-  const verB = getVer(b);
-  if (verA !== verB) return verB - verA;
-  const isLiteA = /-lite/i.test(a);
-  const isLiteB = /-lite/i.test(b);
-  if (isLiteA !== isLiteB) return isLiteA ? 1 : -1;
-  const isFlashA = /flash/i.test(a);
-  const isFlashB = /flash/i.test(b);
-  if (isFlashA !== isFlashB) return isFlashA ? -1 : 1;
-  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
-}
-
-async function requestProviderModels(provider, timeoutMs = 30_000) {
-  if (!provider || typeof provider !== "object") {
-    throw Object.assign(new Error("找不到供应商配置。"), { status: 400 });
-  }
-  if (!provider.apiKey?.trim()) {
-    throw Object.assign(new Error("请先填写 API 密钥。"), { status: 400 });
-  }
-  const protocol = provider.protocol || "openai";
-  if (protocol === "gemini") {
-    const rawBaseUrl = (!provider.baseUrl || !String(provider.baseUrl).trim())
-      ? "https://generativelanguage.googleapis.com/v1beta"
-      : provider.baseUrl;
-    const url = endpointUrl(rawBaseUrl, "/models");
-    url.searchParams.set("key", provider.apiKey.trim());
-    const headers = {
-      "Content-Type": "application/json",
-      "x-goog-api-key": provider.apiKey.trim(),
-    };
-    const response = await fetch(url, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const { payload } = await readUpstreamResponse(response, provider.apiKey, "拉取 Gemini 模型列表");
-    const rawModels = Array.isArray(payload?.models) ? payload.models : [];
-    const filtered = rawModels
-      .filter((m) => {
-        const name = String(m.name || m.id || "").replace(/^models\//, "");
-        if (!name) return false;
-        const lower = name.toLowerCase();
-        if (!lower.includes("gemini")) return false;
-        if (lower.includes("embedding") || lower.includes("embed")) return false;
-        if (lower.includes("imagen") || lower.includes("image")) return false;
-        if (lower.includes("tts") || lower.includes("whisper") || lower.includes("audio-only")) return false;
-        if (Array.isArray(m.supportedGenerationMethods) && !m.supportedGenerationMethods.includes("generateContent")) {
-          return false;
-        }
-        return true;
-      })
-      .map((m) => (m.name || "").replace(/^models\//, ""))
-      .filter(Boolean);
-    filtered.sort(compareGeminiModels);
-    return [...new Set(filtered)];
-  } else {
-    const url = endpointUrl(provider.baseUrl, "/models");
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${provider.apiKey.trim()}`,
-    };
-    const response = await fetch(url, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const { payload } = await readUpstreamResponse(response, provider.apiKey, "拉取模型列表");
-    const list = (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : [])
-      .map((m) => (typeof m === "string" ? m : m.id || m.name || ""))
-      .filter(Boolean);
-    const isGeminiCard = /gemini/i.test(provider.name || "");
-    const filteredList = isGeminiCard
-      ? list.filter((m) => /gemini/i.test(m) && !/embedding|embed|imagen|tts|whisper/i.test(m))
-      : list.filter((m) => !/embedding|embed|dall-e|tts|whisper/i.test(m));
-    if (isGeminiCard) {
-      filteredList.sort(compareGeminiModels);
-    } else {
-      filteredList.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" }));
-    }
-    return [...new Set(filteredList)];
-  }
-}
-
 const reply = (status, body) => ({ status, body });
 return async function dispatch(url, body, signal = new AbortController().signal) {
 signal.throwIfAborted();
-  if (url === "/api/providers/models") {
-    const models = await requestProviderModels(body.provider);
-    return reply(200, { ok: true, models });
-  }
   if (url === '/api/script/batch-library-match') {
-    if (!isGeminiModel(body.provider, body.model)) throw Object.assign(new Error('请选择可用的 Gemini 模型。'), { status: 400 });
+    if (!isScriptAnalysisModel(body.provider, body.model)) throw Object.assign(new Error('请选择可用的剧本分析模型。'), { status: 400 });
     const abort = { signal };
     try {
       const result = await analyzeBatchMusic(body, async messages => {
@@ -568,13 +545,13 @@ signal.throwIfAborted();
         const result = await requestProvider(body.provider, body.model, messages, 240_000, abort.signal);
         abort.signal.throwIfAborted();
         return result.text;
-      });
+      }, { deepseekApi: body.provider.protocol === 'deepseek' });
       return reply(200, result);
     } finally {}
   }
 
   if (url === "/api/script/library-match") {
-    if (!isGeminiModel(body.provider, body.model)) throw Object.assign(new Error("请选择 Gemini 模型。"), { status: 400 });
+    if (!isScriptAnalysisModel(body.provider, body.model)) throw Object.assign(new Error("请选择可用的剧本分析模型。"), { status: 400 });
     const abort = { signal };
     try {
       const result = await analyzeWithWeb('library-match', body, async messages => {
@@ -588,7 +565,7 @@ signal.throwIfAborted();
   }
 
   if (url === "/api/script/score") {
-    if (!isGeminiModel(body.provider, body.model)) throw Object.assign(new Error("请选择 Gemini 模型及 Gemini 或 OpenAI 兼容连接。"), { status: 400 });
+    if (!isScriptAnalysisModel(body.provider, body.model)) throw Object.assign(new Error("请选择可用的剧本分析模型连接。"), { status: 400 });
     const input = validateScoreRequest(body);
     if (input.segmented) {
       const abort = { signal };
@@ -597,7 +574,7 @@ signal.throwIfAborted();
         return reply(200, { segments });
       } finally {}
     }
-    const result = await requestProvider(body.provider, body.model, scoreMessages(input), 120_000);
+    const result = await requestProvider(body.provider, body.model, scoreMessages(input), 120_000, signal);
     return reply(200, { score: parseScoreResponse(result.text, input.durationSeconds) });
   }
 
@@ -614,6 +591,10 @@ signal.throwIfAborted();
       latencyMs: Date.now() - startedAt,
       preview: result.text.slice(0, 120),
     });
+  }
+
+  if (url === '/api/providers/models') {
+    return reply(200, { ok: true, models: await requestProviderModels(body.provider) });
   }
 
   if (url === "/api/chat") {

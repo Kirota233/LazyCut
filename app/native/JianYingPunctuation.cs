@@ -335,12 +335,12 @@ internal sealed partial class JianYingEngine
             CheckInterrupted(gen);
             RequireRealPath(upperDir);
             string upperName = Path.GetFileName(upperDir);
-            if (string.IsNullOrEmpty(upperName) || upperName.Length < 2 || !upperName.EndsWith("上", StringComparison.Ordinal))
+            if (string.IsNullOrEmpty(upperName) || upperName.Length <= 2 || !upperName.EndsWith("-1", StringComparison.Ordinal))
                 continue;
 
             string parentDir = Path.GetDirectoryName(upperDir);
             if (string.IsNullOrEmpty(parentDir)) continue;
-            string lowerName = upperName.Substring(0, upperName.Length - 1) + "下";
+            string lowerName = upperName.Substring(0, upperName.Length - 2) + "-2";
             string lowerDir = Path.Combine(parentDir, lowerName);
             if (Directory.Exists(lowerDir))
             {
@@ -470,25 +470,25 @@ internal sealed partial class JianYingEngine
 
         if (created.Count > 0)
         {
-            string summary = string.Format("共生成 {0} 个下集草稿：{1}", created.Count, string.Join("、", created.Take(8)) + (created.Count > 8 ? " 等" : ""));
+            string summary = string.Format("共生成 {0} 个 -2 草稿：{1}", created.Count, string.Join("、", created.Take(8)) + (created.Count > 8 ? " 等" : ""));
             Log(summary);
-            ShowNotice("下集草稿生成完成", summary);
+            ShowNotice("-2 草稿生成完成", summary);
         }
         else if (skippedNoOutPoint.Count > 0)
         {
-            string msg = string.Format("发现 {0} 个「上」草稿（{1}）未设置有效出点", skippedNoOutPoint.Count, string.Join("、", skippedNoOutPoint.Take(6)));
+            string msg = string.Format("发现 {0} 个「-1」草稿（{1}）未设置有效出点", skippedNoOutPoint.Count, string.Join("、", skippedNoOutPoint.Take(6)));
             Log(msg);
             ShowNotice("未生成新草稿", msg);
         }
         else if (skippedExisting.Count > 0)
         {
-            string msg = string.Format("共检测到 {0} 个「上」草稿，对应「下」草稿均已存在", skippedExisting.Count);
+            string msg = string.Format("共检测到 {0} 个「-1」草稿，对应「-2」草稿均已存在", skippedExisting.Count);
             Log(msg);
             ShowNotice("检测完成", msg);
         }
         else
         {
-            string msg = "草稿目录中未发现以「上」结尾的草稿文件夹";
+            string msg = "草稿目录中未发现以「-1」结尾的草稿文件夹";
             Log(msg);
             ShowNotice("检测完成", msg);
         }

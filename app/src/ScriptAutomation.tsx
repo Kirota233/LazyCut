@@ -1,6 +1,6 @@
 import { MusicDragButton } from './MusicDragButton.jsx';
 import { connectScriptQueue } from './ScriptQueueBridge.mjs';
-import { SCRIPT_LIMIT, splitScript, isGeminiModel, isSunoModel } from '../shared/script-score.mjs';
+import { SCRIPT_LIMIT, splitScript, isScriptAnalysisModel, isSunoModel } from '../shared/script-score.mjs';
 import { QUEUE_KEY, createScriptQueue } from '../shared/script-queue.mjs';
 import { importScriptScore, syncScriptMusic } from './MusicStudio.jsx';
 import { MusicLibrary, clearCurrentLibraryMatch } from './MusicLibrary.tsx';
@@ -163,7 +163,7 @@ export function ScriptAutomation({ providers, automation, onNavigate }: ScriptAu
       model,
     }))
   );
-  const geminis: ModelOption[] = [...models.filter(m => isGeminiModel(m.provider, m.model)), ...(WEB_ANALYZERS as ModelOption[])];
+  const geminis: ModelOption[] = [...models.filter(m => isScriptAnalysisModel(m.provider, m.model)), ...(WEB_ANALYZERS as ModelOption[])];
   const sunos: ModelOption[] = models.filter(m => isSunoModel(m.provider, m.model));
   const gemini = geminis.find(m => m.key === draft.geminiKey) || geminis[0];
   const libraryGemini = geminis.find(m => m.key === draft.libraryGeminiKey) || geminis[0];
@@ -211,7 +211,7 @@ export function ScriptAutomation({ providers, automation, onNavigate }: ScriptAu
     perform(() => {
       if (!gemini || !suno) throw new Error('请选择剧本分析模型，并配置 Suno 音乐模型。');
       if (!analysisReady(gemini) || !suno.provider.apiKey?.trim()) {
-        throw new Error('所选 API 连接缺少密钥，请先补充。DeepSeek、豆包网页版只需登录账号。');
+        throw new Error('所选 API 连接缺少密钥，请先补充；网页版分析需先登录账号。');
       }
       if (extraction.error) throw new Error(extraction.error);
       const lines = subtitleLines;
@@ -615,7 +615,33 @@ export function ScriptAutomation({ providers, automation, onNavigate }: ScriptAu
                   rows={7}
                   maxLength={SCRIPT_LIMIT}
                   value={draft.script}
-                  onChange={(e: any) => change({ script: e.target.value })}
+                  onPaste={(e: any) => {
+                    const pasted = e.clipboardData?.getData?.('text/plain') || '';
+                    if (pasted.trim().length > 60) {
+                      const episodes = splitDramaEpisodes(pasted);
+                      if (episodes.length >= 2) {
+                        e.preventDefault();
+                        perform(() => {
+                          const count = projects.importEpisodes(episodes);
+                          setMessage(`已自动识别并切分为 ${count} 集剧本（可在上方分集栏左右滑动切换）。`);
+                        });
+                      }
+                    }
+                  }}
+                  onChange={(e: any) => {
+                    const nextVal = e.target.value;
+                    if (nextVal.length - draft.script.length > 60) {
+                      const episodes = splitDramaEpisodes(nextVal);
+                      if (episodes.length >= 2) {
+                        perform(() => {
+                          const count = projects.importEpisodes(episodes);
+                          setMessage(`已自动识别并切分为 ${count} 集剧本（可在上方分集栏左右滑动切换）。`);
+                        });
+                        return;
+                      }
+                    }
+                    change({ script: nextVal });
+                  }}
                   placeholder={
                     '3-1 日 外 银泉庄园大门\n守卫甲：你好，请问二位有请柬吗？\n[EN] GUARD A: Good day. May I see your invitation?\n△ 车窗缓缓降下。\n凯尔：我来见我的家人。\n[EN] KYLE: I came to see my family.'
                   }
