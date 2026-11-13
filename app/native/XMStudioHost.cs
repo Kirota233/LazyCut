@@ -8,6 +8,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -492,6 +493,23 @@ namespace XMStudioHost
         public Action<string[]> OnPathsDropped;
         public Action<string> OnDropChoice;
 
+        private string _miaoDir;
+        private System.Windows.Forms.Timer _deferredGifTimer;
+
+        private void LoadGifKey(string key)
+        {
+            if (string.IsNullOrEmpty(_miaoDir) || _gifs.ContainsKey(key)) return;
+            string p = Path.Combine(_miaoDir, key + ".gif");
+            if (!File.Exists(p)) return;
+            try
+            {
+                Image img = Image.FromFile(p);
+                _gifs[key] = img;
+                ImageAnimator.Animate(img, OnGifFrameChanged);
+            }
+            catch { }
+        }
+
         public LayeredPetOrbForm(string miaoDir)
         {
             Text = "月薪喵";
@@ -502,7 +520,8 @@ namespace XMStudioHost
             StartPosition = FormStartPosition.Manual;
             Size = new Size(230, 256);
 
-            string[] keys = new string[] { "default", "angry", "comfort", "cry", "enjoy", "float", "play" };
+            _miaoDir = miaoDir;
+            string[] keys = new string[] { "default" };
             foreach (string k in keys)
             {
                 string p = Path.Combine(miaoDir, k + ".gif");
@@ -543,6 +562,18 @@ namespace XMStudioHost
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            _deferredGifTimer = new System.Windows.Forms.Timer { Interval = 350 };
+            _deferredGifTimer.Tick += (_, __) =>
+            {
+                _deferredGifTimer.Stop();
+                _deferredGifTimer.Dispose();
+                foreach (string k in new[] { "angry", "comfort", "cry", "enjoy", "float", "play" })
+                {
+                    LoadGifKey(k);
+                }
+            };
+            _deferredGifTimer.Start();
+            FormClosed += (_, __) => { try { if (_deferredGifTimer != null) _deferredGifTimer.Dispose(); } catch { } };
             Win32.DisableBorderAndShadow(Handle);
             Win32.ExcludeFromCapture(Handle);
             RenderLayered();
@@ -573,6 +604,7 @@ namespace XMStudioHost
             _progressPercent = -1;
             _bubbleText = string.Format("收到 {0} 个文件，要做什么呢？", count);
             _bubbleUntil = DateTime.UtcNow.AddSeconds(30);
+            LoadGifKey("comfort");
             if (_gifs.ContainsKey("comfort"))
             {
                 _currentKey = "comfort";
@@ -589,6 +621,7 @@ namespace XMStudioHost
             _progressPercent = Math.Max(4, Math.Min(100, percent));
             _bubbleText = text;
             _bubbleUntil = DateTime.UtcNow.AddSeconds(30);
+            LoadGifKey("play");
             if (_gifs.ContainsKey("play"))
             {
                 _currentKey = "play";
@@ -609,6 +642,7 @@ namespace XMStudioHost
 
         public void SwitchGif(string key, string message, int durationMs = 5200)
         {
+            LoadGifKey(key);
             if (!_gifs.ContainsKey(key)) key = "default";
             _currentKey = key;
             _currentGif = _gifs.ContainsKey(key) ? _gifs[key] : null;
@@ -1138,9 +1172,10 @@ namespace XMStudioHost
 
         public bool Enabled { get { return _enabled; } }
 
+        private bool _veCreatorChecked;
+
         public NativePeriodKeeperEngine()
         {
-            EnsureVeCreatorIntegrity();
             _sentinelThread = new Thread(ClipboardSentinelLoop) { IsBackground = true, Name = "PeriodClipboardSentinel" };
             _sentinelThread.Start();
             _monitorThread = new Thread(MonitorJianyingLoop) { IsBackground = true, Name = "PeriodJianyingMonitor" };
@@ -1313,6 +1348,11 @@ namespace XMStudioHost
 
         private void MonitorJianyingLoop()
         {
+            if (!_veCreatorChecked)
+            {
+                _veCreatorChecked = true;
+                EnsureVeCreatorIntegrity();
+            }
             while (!_disposed)
             {
                 try
@@ -1994,9 +2034,9 @@ namespace XMStudioHost
         }
     }
 
-    internal sealed class StudioAppContext : ApplicationContext
+    internal sealed partial class StudioAppContext : ApplicationContext
     {
-        public const string CurrentVersion = "1.8.2";
+        public const string CurrentVersion = "1.8.3";
         public const int AppPort = 37651;
         private readonly string _baseDir;
         private readonly string _userDataDir;
@@ -2009,6 +2049,10 @@ namespace XMStudioHost
         private WebView2 _mainWebView;
         private WebView2 _aiWebView;
         private string _activeAiProvider = "deepseek";
+        private string _aiUrl = "https://chat.deepseek.com/";
+        private string _aiError = "";
+        private bool _aiVisible = false;
+        private bool _aiLoading = false;
         private LayeredPetOrbForm _orbForm;
         private Form _panelForm;
         private WebView2 _panelWebView;
@@ -2067,6 +2111,8 @@ namespace XMStudioHost
         private readonly ConcurrentDictionary<string, string> _musicIdToPath = new ConcurrentDictionary<string, string>();
         private readonly ConcurrentDictionary<string, string> _downloadedUrlToPath = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, string> _dragTokens = new ConcurrentDictionary<string, string>();
+        private readonly object _musicScanLock = new object();
+        private Task<Dictionary<string, object>> _initialMusicScanTask;
         private Dictionary<string, object> _musicCatalog = new Dictionary<string, object>
         {
             { "directories", new object[0] }, { "tracks", new object[0] }, { "scannedAt", 0 }, { "revision", "" }, { "warning", "" }
@@ -2335,11 +2381,11 @@ namespace XMStudioHost
 
             _mainForm.Shown += async (s, e) =>
             {
-                await InitWebViewAsync(_mainWebView, "main", string.Format("http://127.0.0.1:{0}/", AppPort), true);
+                Task mainWvTask = InitWebViewAsync(_mainWebView, "main", string.Format("http://127.0.0.1:{0}/", AppPort), true);
                 await ShowCompanionAsync(false);
+                await mainWvTask;
                 var unusedInit = Task.Run(async () =>
                 {
-                    await Task.Delay(1200);
                     if (_jianyingRpc != null)
                     {
                         try
@@ -2352,12 +2398,25 @@ namespace XMStudioHost
                     }
                     await CheckUpdaterAsync();
                 });
+                var unusedPrewarm = PrewarmCompanionPanelAfterDelayAsync();
             };
 
+            WarmWebViewEnv("main");
             _mainForm.Show();
         }
 
-        private async Task InitWebViewAsync(WebView2 wv, string profileSubdir, string url, bool injectBridge)
+        private async Task PrewarmCompanionPanelAfterDelayAsync()
+        {
+            try
+            {
+                await Task.Delay(1200);
+                if (_mainForm == null || _mainForm.IsDisposed || !_mainForm.IsHandleCreated) return;
+                _mainForm.BeginInvoke(new Action(() => { var _ = EnsureCompanionPanelAsync(); }));
+            }
+            catch { }
+        }
+
+        private Task<CoreWebView2Environment> WarmWebViewEnv(string profileSubdir)
         {
             string envDir = Path.Combine(_userDataDir, "webview2", profileSubdir);
             Directory.CreateDirectory(envDir);
@@ -2367,7 +2426,12 @@ namespace XMStudioHost
                 envTask = CoreWebView2Environment.CreateAsync(null, envDir);
                 _webViewEnvs[profileSubdir] = envTask;
             }
-            var env = await envTask;
+            return envTask;
+        }
+
+        private async Task InitWebViewAsync(WebView2 wv, string profileSubdir, string url, bool injectBridge)
+        {
+            var env = await WarmWebViewEnv(profileSubdir);
             await wv.EnsureCoreWebView2Async(env);
             wv.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             wv.CoreWebView2.Settings.AreDevToolsEnabled = false;
@@ -2544,6 +2608,10 @@ namespace XMStudioHost
                 case "choose-directory":
                     return ChooseFolderDialog("选择文件夹");
                 case "music-library-list":
+                    if (_initialMusicScanTask != null && !_initialMusicScanTask.IsCompleted)
+                    {
+                        await _initialMusicScanTask;
+                    }
                     return _musicCatalog;
                 case "music-library-refresh":
                     return await Task.Run(() => ScanMusicLibrary());
@@ -2634,6 +2702,10 @@ namespace XMStudioHost
                     return await HandleWebAiLayoutAsync(payload);
                 case "web-ai-action":
                     return await HandleWebAiActionAsync(payload);
+                case "local-model-action":
+                    return await LocalModelAction(
+                        payload.ContainsKey("action") ? Convert.ToString(payload["action"]) : "status",
+                        payload.ContainsKey("model") ? Convert.ToString(payload["model"]) : "");
                 case "web-analysis-status":
                     return null;
 
@@ -2690,8 +2762,19 @@ namespace XMStudioHost
             string body = payload.ContainsKey("body") ? Convert.ToString(payload["body"]) : "";
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = method;
-            req.Timeout = 135000;
-            req.UserAgent = "XM-Editing-Studio/" + CurrentVersion;
+            int timeoutMs = 135000;
+            if (payload.ContainsKey("timeoutMs") && payload["timeoutMs"] != null)
+            {
+                try { timeoutMs = Math.Max(5000, Math.Min(900000, Convert.ToInt32(payload["timeoutMs"]))); } catch { }
+            }
+            req.Timeout = timeoutMs;
+            req.ReadWriteTimeout = timeoutMs;
+            if (url.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                || url.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase))
+            {
+                req.Proxy = null;
+            }
+            req.UserAgent = "LazyCut/" + CurrentVersion;
 
             if (payload.ContainsKey("headers") && payload["headers"] is Dictionary<string, object>)
             {
@@ -3142,13 +3225,50 @@ namespace XMStudioHost
             return files;
         }
 
-        // ======================== Domestic Web AI (DeepSeek / Doubao) ========================
+        // ======================== Domestic Web AI (DeepSeek / Doubao / Qwen / Kimi) ========================
+        private static void ResolveWebAiTarget(string provider, out string targetUrl, out string expectedDomain)
+        {
+            switch ((provider ?? "").Trim().ToLowerInvariant())
+            {
+                case "doubao":
+                    targetUrl = "https://www.doubao.com/chat/";
+                    expectedDomain = "doubao.com";
+                    return;
+                case "qwen":
+                    targetUrl = "https://www.qianwen.com/";
+                    expectedDomain = "qianwen.com";
+                    return;
+                case "kimi":
+                    targetUrl = "https://www.kimi.com/";
+                    expectedDomain = "kimi.com";
+                    return;
+                default:
+                    targetUrl = "https://chat.deepseek.com/";
+                    expectedDomain = "deepseek.com";
+                    return;
+            }
+        }
+
+        private Dictionary<string, object> BuildWebAiStatus(string provider, string fallbackUrl)
+        {
+            return new Dictionary<string, object>
+            {
+                { "provider", provider },
+                { "visible", _aiVisible },
+                { "loading", _aiLoading },
+                { "error", _aiError },
+                { "official", true },
+                { "url", string.IsNullOrEmpty(_aiUrl) ? fallbackUrl : _aiUrl }
+            };
+        }
+
         private async Task<object> HandleWebAiLayoutAsync(Dictionary<string, object> payload)
         {
             bool visible = payload.ContainsKey("visible") && Convert.ToBoolean(payload["visible"]);
-            string provider = payload.ContainsKey("provider") ? Convert.ToString(payload["provider"]) : "deepseek";
+            string provider = payload.ContainsKey("provider") ? Convert.ToString(payload["provider"]) : _activeAiProvider;
             _activeAiProvider = provider;
-            string targetUrl = provider == "doubao" ? "https://www.doubao.com/chat/" : "https://chat.deepseek.com/";
+            string targetUrl, expectedDomain;
+            ResolveWebAiTarget(provider, out targetUrl, out expectedDomain);
 
             var tcs = new TaskCompletionSource<object>();
             _mainForm.BeginInvoke(new Action(async () =>
@@ -3157,6 +3277,7 @@ namespace XMStudioHost
                 {
                     if (!visible)
                     {
+                        _aiVisible = false;
                         if (_aiWebView != null) BrowserInput.Hide(_aiWebView, _mainWebView);
                         tcs.TrySetResult(null);
                         return;
@@ -3164,13 +3285,14 @@ namespace XMStudioHost
                     var b = payload.ContainsKey("bounds") && payload["bounds"] is Dictionary<string, object>
                         ? (Dictionary<string, object>)payload["bounds"]
                         : null;
-                    if (b == null) { tcs.TrySetResult(null); return; }
+                    if (b == null) { _aiVisible = false; tcs.TrySetResult(null); return; }
                     int x = Convert.ToInt32(b["x"]);
                     int y = Convert.ToInt32(b["y"]);
                     int w = Convert.ToInt32(b["width"]);
                     int h = Convert.ToInt32(b["height"]);
                     if (w < 100 || h < 80)
                     {
+                        _aiVisible = false;
                         if (_aiWebView != null) BrowserInput.Hide(_aiWebView, _mainWebView);
                         tcs.TrySetResult(null);
                         return;
@@ -3178,6 +3300,9 @@ namespace XMStudioHost
 
                     if (_aiWebView == null)
                     {
+                        _aiLoading = true;
+                        _aiError = "";
+                        _aiUrl = targetUrl;
                         _aiWebView = new WebView2
                         {
                             DefaultBackgroundColor = Color.FromArgb(14, 18, 20),
@@ -3186,13 +3311,37 @@ namespace XMStudioHost
                         _mainForm.Controls.Add(_aiWebView);
                         _aiWebView.BringToFront();
                         await InitWebViewAsync(_aiWebView, "web-ai", targetUrl, false);
+                        if (_aiWebView.CoreWebView2 != null)
+                        {
+                            _aiWebView.CoreWebView2.NavigationStarting += (s, e) =>
+                            {
+                                _aiLoading = true;
+                                _aiError = "";
+                            };
+                            _aiWebView.CoreWebView2.SourceChanged += (s, e) =>
+                            {
+                                if (_aiWebView != null && _aiWebView.CoreWebView2 != null)
+                                    _aiUrl = _aiWebView.CoreWebView2.Source ?? _aiUrl;
+                            };
+                            _aiWebView.CoreWebView2.NavigationCompleted += (s, e) =>
+                            {
+                                _aiLoading = false;
+                                if (_aiWebView != null && _aiWebView.CoreWebView2 != null)
+                                    _aiUrl = _aiWebView.CoreWebView2.Source ?? _aiUrl;
+                                if (!e.IsSuccess && e.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled)
+                                    _aiError = "网页加载失败 (" + e.WebErrorStatus + ")";
+                            };
+                        }
                     }
                     else if (_aiWebView.CoreWebView2 != null)
                     {
                         string curUrl = _aiWebView.CoreWebView2.Source ?? "";
-                        string expectedDomain = provider == "doubao" ? "doubao.com" : "deepseek.com";
+                        _aiUrl = curUrl;
                         if (curUrl.IndexOf(expectedDomain, StringComparison.OrdinalIgnoreCase) < 0)
                         {
+                            _aiLoading = true;
+                            _aiError = "";
+                            _aiUrl = targetUrl;
                             _aiWebView.CoreWebView2.Navigate(targetUrl);
                         }
                     }
@@ -3203,15 +3352,9 @@ namespace XMStudioHost
                     Win32.DeleteObject(rgn);
                     _aiWebView.Visible = true;
                     _aiWebView.BringToFront();
+                    _aiVisible = true;
 
-                    tcs.TrySetResult(new Dictionary<string, object>
-                    {
-                        { "provider", provider },
-                        { "loading", false },
-                        { "error", "" },
-                        { "official", true },
-                        { "url", _aiWebView.CoreWebView2 != null ? _aiWebView.CoreWebView2.Source : targetUrl }
-                    });
+                    tcs.TrySetResult(BuildWebAiStatus(provider, targetUrl));
                 }
                 catch (Exception ex)
                 {
@@ -3221,34 +3364,82 @@ namespace XMStudioHost
             return await tcs.Task;
         }
 
-        private Task<object> HandleWebAiActionAsync(Dictionary<string, object> payload)
+        private async Task<object> HandleWebAiActionAsync(Dictionary<string, object> payload)
         {
             string id = payload.ContainsKey("id") ? Convert.ToString(payload["id"]) : _activeAiProvider;
             string action = payload.ContainsKey("action") ? Convert.ToString(payload["action"]) : "status";
-            string targetUrl = id == "doubao" ? "https://www.doubao.com/chat/" : "https://chat.deepseek.com/";
+            string script = payload.ContainsKey("script") ? Convert.ToString(payload["script"]) : "";
+            string targetUrl, expectedDomain;
+            ResolveWebAiTarget(id, out targetUrl, out expectedDomain);
 
             if (action == "external")
             {
-                try { Process.Start(new ProcessStartInfo(targetUrl) { UseShellExecute = true }); } catch { }
-                return Task.FromResult<object>(new Dictionary<string, object> { { "provider", id }, { "external", true } });
+                string openUrl = (!string.IsNullOrEmpty(_aiUrl) && _aiUrl.IndexOf(expectedDomain, StringComparison.OrdinalIgnoreCase) >= 0) ? _aiUrl : targetUrl;
+                try { Process.Start(new ProcessStartInfo(openUrl) { UseShellExecute = true }); } catch { }
+                return new Dictionary<string, object> { { "provider", id }, { "external", true } };
             }
+
+            if (action == "exec" || (action == "login" && !string.IsNullOrEmpty(script)) || (action == "page-status" && !string.IsNullOrEmpty(script)))
+            {
+                if (_aiWebView == null || _aiWebView.IsDisposed || !_aiVisible)
+                {
+                    var st = BuildWebAiStatus(id, targetUrl);
+                    st["result"] = null;
+                    return st;
+                }
+                var execTcs = new TaskCompletionSource<object>();
+                _mainForm.BeginInvoke(new Action(async () =>
+                {
+                    try
+                    {
+                        var st = BuildWebAiStatus(id, targetUrl);
+                        if (_aiWebView == null || _aiWebView.IsDisposed || _aiWebView.CoreWebView2 == null)
+                        {
+                            st["result"] = null;
+                            execTcs.TrySetResult(st);
+                            return;
+                        }
+                        if (!string.IsNullOrEmpty(script))
+                        {
+                            string rawResult = await _aiWebView.CoreWebView2.ExecuteScriptAsync(script);
+                            object decoded = null;
+                            if (!string.IsNullOrWhiteSpace(rawResult))
+                            {
+                                try { decoded = _json.DeserializeObject(rawResult); } catch { decoded = rawResult; }
+                            }
+                            st["result"] = decoded;
+                        }
+                        execTcs.TrySetResult(st);
+                    }
+                    catch (Exception ex)
+                    {
+                        execTcs.TrySetException(ex);
+                    }
+                }));
+                return await execTcs.Task;
+            }
+
             if (_aiWebView != null && !_aiWebView.IsDisposed)
             {
                 _mainForm.BeginInvoke(new Action(() =>
                 {
-                    if (_aiWebView.CoreWebView2 == null) return;
-                    if (action == "reload") _aiWebView.CoreWebView2.Reload();
-                    else if (action == "home") _aiWebView.CoreWebView2.Navigate(targetUrl);
+                    if (_aiWebView == null || _aiWebView.IsDisposed || _aiWebView.CoreWebView2 == null) return;
+                    if (action == "reload")
+                    {
+                        _aiLoading = true;
+                        _aiError = "";
+                        _aiWebView.CoreWebView2.Reload();
+                    }
+                    else if (action == "home")
+                    {
+                        _aiLoading = true;
+                        _aiError = "";
+                        _aiUrl = targetUrl;
+                        _aiWebView.CoreWebView2.Navigate(targetUrl);
+                    }
                 }));
             }
-            return Task.FromResult<object>(new Dictionary<string, object>
-            {
-                { "provider", id },
-                { "loading", false },
-                { "error", "" },
-                { "official", true },
-                { "url", targetUrl }
-            });
+            return BuildWebAiStatus(id, targetUrl);
         }
 
         // ======================== Companion Dock 「悬浮窗 · 月薪喵」 ========================
@@ -3313,58 +3504,96 @@ namespace XMStudioHost
             }
         }
 
-        private async Task EnsureCompanionFormsAsync()
+        private Task _panelInitTask;
+
+        private async Task EnsureCompanionFormsAsync(bool includePanel = true)
         {
-            if (_orbForm != null && !_orbForm.IsDisposed) return;
+            if (_orbForm == null || _orbForm.IsDisposed)
+            {
+                var tcs = new TaskCompletionSource<bool>();
+                _mainForm.BeginInvoke(new Action(() =>
+                {
+                    if (_orbForm == null || _orbForm.IsDisposed)
+                    {
+                        var area = Screen.PrimaryScreen.WorkingArea;
+                        string miaoDir = Path.Combine(_clientDir, "miao");
+                        _orbForm = new LayeredPetOrbForm(miaoDir)
+                        {
+                            Bounds = new Rectangle(area.Right - 254, area.Bottom - 280, 230, 256),
+                            Icon = LoadAppIcon(),
+                        };
+                        _orbForm.OnTogglePanel = () =>
+                        {
+                            var unused = HandleCompanionActionAsync("panel", "toggle");
+                        };
+                        _orbForm.OnMoved = () =>
+                        {
+                            _autoDock = false;
+                            if (_panelOpen) PlaceCompanionPanel();
+                        };
+                        _orbForm.OnPathsDropped = files =>
+                        {
+                            var unused = HandleCompanionActionAsync("drop-paths", files);
+                        };
+                        _orbForm.OnDropChoice = choice =>
+                        {
+                            var unused = HandleCompanionActionAsync("drop-choice", choice);
+                        };
+                    }
+                    tcs.TrySetResult(true);
+                }));
+                await tcs.Task;
+            }
+            if (includePanel) await EnsureCompanionPanelAsync();
+        }
+
+        private Task EnsureCompanionPanelAsync()
+        {
+            if (_panelForm != null && !_panelForm.IsDisposed && _panelWebView != null && _panelWebView.CoreWebView2 != null)
+            {
+                return Task.CompletedTask;
+            }
+            if (_panelInitTask != null && !_panelInitTask.IsFaulted && !_panelInitTask.IsCanceled)
+            {
+                return _panelInitTask;
+            }
             var tcs = new TaskCompletionSource<bool>();
             _mainForm.BeginInvoke(new Action(async () =>
             {
-                var area = Screen.PrimaryScreen.WorkingArea;
-                string miaoDir = Path.Combine(_clientDir, "miao");
-                _orbForm = new LayeredPetOrbForm(miaoDir)
+                try
                 {
-                    Bounds = new Rectangle(area.Right - 254, area.Bottom - 280, 230, 256),
-                    Icon = LoadAppIcon(),
-                };
-                _orbForm.OnTogglePanel = () =>
+                    if (_panelForm == null || _panelForm.IsDisposed)
+                    {
+                        _panelForm = new ResizablePanelForm
+                        {
+                            Text = "悬浮窗 · 剪映自动化",
+                            FormBorderStyle = FormBorderStyle.None,
+                            ShowInTaskbar = false,
+                            TopMost = true,
+                            StartPosition = FormStartPosition.Manual,
+                            Size = new Size(390, 420),
+                            Padding = new Padding(3),
+                            BackColor = Color.FromArgb(16, 20, 26),
+                            Icon = LoadAppIcon(),
+                        };
+                        Win32.EnableRoundedAndDark(_panelForm.Handle, true);
+                        Win32.ExcludeFromCapture(_panelForm.Handle);
+                        _panelWebView = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.Transparent };
+                        _panelForm.Controls.Add(_panelWebView);
+                    }
+                    if (_panelWebView.CoreWebView2 == null)
+                    {
+                        await InitWebViewAsync(_panelWebView, "main", string.Format("http://127.0.0.1:{0}/companion-panel.html?acrylic=1", AppPort), true);
+                    }
+                    tcs.TrySetResult(true);
+                }
+                catch (Exception ex)
                 {
-                    var unused = HandleCompanionActionAsync("panel", "toggle");
-                };
-                _orbForm.OnMoved = () =>
-                {
-                    _autoDock = false;
-                    if (_panelOpen) PlaceCompanionPanel();
-                };
-                _orbForm.OnPathsDropped = files =>
-                {
-                    var unused = HandleCompanionActionAsync("drop-paths", files);
-                };
-                _orbForm.OnDropChoice = choice =>
-                {
-                    var unused = HandleCompanionActionAsync("drop-choice", choice);
-                };
-
-                _panelForm = new ResizablePanelForm
-                {
-                    Text = "悬浮窗 · 剪映自动化",
-                    FormBorderStyle = FormBorderStyle.None,
-                    ShowInTaskbar = false,
-                    TopMost = true,
-                    StartPosition = FormStartPosition.Manual,
-                    Size = new Size(390, 420),
-                    Padding = new Padding(3),
-                    BackColor = Color.FromArgb(16, 20, 26),
-                    Icon = LoadAppIcon(),
-                };
-                Win32.EnableRoundedAndDark(_panelForm.Handle, true);
-                Win32.ExcludeFromCapture(_panelForm.Handle);
-                _panelWebView = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.Transparent };
-                _panelForm.Controls.Add(_panelWebView);
-
-                await InitWebViewAsync(_panelWebView, "main", string.Format("http://127.0.0.1:{0}/companion-panel.html?acrylic=1", AppPort), true);
-                tcs.TrySetResult(true);
+                    tcs.TrySetException(ex);
+                }
             }));
-            await tcs.Task;
+            _panelInitTask = tcs.Task;
+            return _panelInitTask;
         }
 
         private void PlaceCompanionPanel()
@@ -3381,7 +3610,7 @@ namespace XMStudioHost
 
         private async Task<Dictionary<string, object>> ShowCompanionAsync(bool openPanel)
         {
-            await EnsureCompanionFormsAsync();
+            await EnsureCompanionFormsAsync(openPanel);
             _companionVisible = true;
             _mainForm.BeginInvoke(new Action(() =>
             {
@@ -3530,20 +3759,25 @@ namespace XMStudioHost
             }
             if (action == "panel" || action == "expand")
             {
-                await EnsureCompanionFormsAsync();
-                _panelOpen = Convert.ToString(value) == "toggle" ? !_panelOpen : Convert.ToBoolean(value);
+                bool nextOpen = Convert.ToString(value) == "toggle" ? !_panelOpen : Convert.ToBoolean(value);
+                if (nextOpen) await EnsureCompanionFormsAsync(true);
+                else await EnsureCompanionFormsAsync(false);
+                _panelOpen = nextOpen;
                 _mainForm.BeginInvoke(new Action(() =>
                 {
                     if (_panelOpen)
                     {
                         PlaceCompanionPanel();
-                        _panelForm.Show();
-                        _panelForm.BringToFront();
-                        _panelForm.Activate();
+                        if (_panelForm != null && !_panelForm.IsDisposed)
+                        {
+                            _panelForm.Show();
+                            _panelForm.BringToFront();
+                            _panelForm.Activate();
+                        }
                     }
                     else
                     {
-                        _panelForm.Hide();
+                        if (_panelForm != null && !_panelForm.IsDisposed) _panelForm.Hide();
                     }
                 }));
                 return BroadcastCompanionState();
@@ -3738,6 +3972,11 @@ namespace XMStudioHost
                 return BroadcastCompanionState();
             }
             if (action == "launch-jy") { LaunchJianyingExecutable(); return BroadcastCompanionState(); }
+            if (action == "restart-jy")
+            {
+                await RestartJianyingExecutableAsync();
+                return BroadcastCompanionState();
+            }
             if (action == "navigate")
             {
                 _mainForm.BeginInvoke(new Action(() =>
@@ -4013,6 +4252,14 @@ namespace XMStudioHost
         }
 
         private Dictionary<string, object> ScanMusicLibrary()
+        {
+            lock (_musicScanLock)
+            {
+                return ScanMusicLibraryCore();
+            }
+        }
+
+        private Dictionary<string, object> ScanMusicLibraryCore()
         {
             var roots = _musicRoots.ToArray();
             var dirs = new List<Dictionary<string, object>>();
@@ -4322,19 +4569,132 @@ namespace XMStudioHost
             catch { }
         }
 
-        private static void LaunchJianyingExecutable()
+        private static string FindJianyingExecutable()
         {
+            foreach (var p in Process.GetProcessesByName("JianyingPro"))
+            {
+                using (p)
+                {
+                    try
+                    {
+                        if (!p.HasExited && File.Exists(p.MainModule.FileName))
+                        {
+                            return p.MainModule.FileName;
+                        }
+                    }
+                    catch { }
+                }
+            }
             string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string[] candidates = new[]
+            var candidates = new List<string>
             {
                 Path.Combine(localApp, "JianyingPro", "Apps", "JianyingPro.exe"),
                 Path.Combine(localApp, "JianyingPro", "JianyingPro.exe"),
                 Path.Combine(localApp, "Programs", "JianyingPro", "JianyingPro.exe"),
+                @"D:\JianyingPro\JianyingPro.exe",
+                @"C:\Program Files\JianyingPro\JianyingPro.exe"
             };
+            foreach (var hive in new[] { Microsoft.Win32.Registry.CurrentUser, Microsoft.Win32.Registry.LocalMachine })
+            {
+                try
+                {
+                    using (var key = hive.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\JianyingPro.exe"))
+                    {
+                        if (key != null)
+                        {
+                            string v = Convert.ToString(key.GetValue(""));
+                            if (!string.IsNullOrEmpty(v)) candidates.Insert(0, v);
+                        }
+                    }
+                }
+                catch { }
+            }
             foreach (var c in candidates)
             {
-                if (File.Exists(c)) { try { Process.Start(c); return; } catch { } }
+                if (!string.IsNullOrEmpty(c) && File.Exists(c)) return c;
             }
+            return "";
+        }
+
+        private static void LaunchJianyingExecutable()
+        {
+            string exe = FindJianyingExecutable();
+            if (!string.IsNullOrEmpty(exe))
+            {
+                try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe) }); } catch { }
+            }
+        }
+
+        internal static bool ShouldStopJianyingProcess(string name, string path, IEnumerable<string> roots)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            string file = Path.GetFileName(path);
+            if (name == "JianyingPro" && file.Equals("JianyingPro.exe", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name == "JianyingProTray" && file.Equals("JianyingProTray.exe", StringComparison.OrdinalIgnoreCase)) return true;
+            return name == "VEDetector" && file.Equals("VEDetector.exe", StringComparison.OrdinalIgnoreCase)
+                && roots.Any(root => path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private async Task RestartJianyingExecutableAsync()
+        {
+            string executable = FindJianyingExecutable();
+            if (string.IsNullOrEmpty(executable) || !File.Exists(executable))
+            {
+                throw new Exception("未找到剪映可执行文件，请先启动过剪映或检查安装路径。");
+            }
+            DialogResult confirm = DialogResult.No;
+            if (_mainForm != null && !_mainForm.IsDisposed)
+            {
+                var tcs = new TaskCompletionSource<DialogResult>();
+                _mainForm.BeginInvoke(new Action(() =>
+                {
+                    IWin32Window owner = (_panelForm != null && !_panelForm.IsDisposed && _panelForm.Visible) ? (IWin32Window)_panelForm : _mainForm;
+                    tcs.TrySetResult(MessageBox.Show(owner, "重启会强制关闭所有剪映窗口及相关后台进程。请先保存剪映中尚未保存的草稿。\n\n确认重启剪映？", "重启剪映", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2));
+                }));
+                confirm = await tcs.Task;
+            }
+            if (confirm != DialogResult.Yes) return;
+            await Task.Run(() =>
+            {
+                var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                Action<string> addRoot = path =>
+                {
+                    string directory = Path.GetDirectoryName(Path.GetFullPath(path));
+                    roots.Add(directory);
+                    if (Regex.IsMatch(Path.GetFileName(directory), @"^\d+(\.\d+){1,5}$")) roots.Add(Path.GetDirectoryName(directory));
+                };
+                addRoot(executable);
+                foreach (var process in Process.GetProcessesByName("JianyingPro")) using (process)
+                {
+                    try { if (!process.HasExited) addRoot(process.MainModule.FileName); }
+                    catch (InvalidOperationException) { }
+                    catch (System.ComponentModel.Win32Exception) { throw new Exception("无法确认剪映进程路径，请手动退出剪映后重试。"); }
+                }
+                foreach (string name in new[] { "JianyingProTray", "JianyingPro", "VEDetector" })
+                {
+                    foreach (var process in Process.GetProcessesByName(name)) using (process)
+                    {
+                        try
+                        {
+                            if (process.HasExited || !ShouldStopJianyingProcess(name, process.MainModule.FileName, roots)) continue;
+                            process.Kill();
+                            if (!process.WaitForExit(5000)) throw new Exception("剪映进程未能退出，请手动关闭后重试。");
+                        }
+                        catch (InvalidOperationException) { }
+                        catch (System.ComponentModel.Win32Exception) { throw new Exception("无法结束剪映进程，请以相同权限运行 LazyCut 或手动退出剪映。"); }
+                    }
+                }
+                foreach (string name in new[] { "JianyingProTray", "JianyingPro", "VEDetector" })
+                {
+                    foreach (var process in Process.GetProcessesByName(name)) using (process)
+                    {
+                        try { if (!process.HasExited && ShouldStopJianyingProcess(name, process.MainModule.FileName, roots)) throw new Exception("剪映仍有后台进程运行，请手动关闭后重试。"); }
+                        catch (InvalidOperationException) { }
+                        catch (System.ComponentModel.Win32Exception) { throw new Exception("无法确认剪映后台进程已退出，请手动检查后重试。"); }
+                    }
+                }
+                Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(executable) });
+            });
         }
 
         private static string Sha256Hex(string input)
@@ -4370,7 +4730,7 @@ namespace XMStudioHost
                             if (!string.IsNullOrEmpty(s) && !_musicRoots.Contains(s)) _musicRoots.Add(s);
                         }
                     }
-                    ScanMusicLibrary();
+                    _initialMusicScanTask = Task.Run(() => ScanMusicLibrary());
                 }
             }
             catch { }
@@ -4388,6 +4748,7 @@ namespace XMStudioHost
 
         private void DisposeAll()
         {
+            try { StopLocalModels(); } catch { }
             try { if (_companionTimer != null) _companionTimer.Stop(); } catch { }
             try { if (_periodEngine != null) _periodEngine.Dispose(); } catch { }
             try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); } } catch { }

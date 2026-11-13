@@ -1,12 +1,11 @@
-import { normalizeMusicOptions, buildSunoBody } from '../shared/music-options.mjs';
-import { getSunoSongs } from '../server/suno-response.mjs';
-import { isGeminiModel, scoreMessages, parseScoreResponse, validateScoreRequest, materialTexts } from '../shared/script-score.mjs';
-import { validateLibraryInput, keywordMessages, parseKeywords, shortlistTracks, matchMessages, parseMatches } from '../shared/library-match.mjs';
-import { segmentMessages, segmentRetryMessages, parseSegments, segmentCandidates, segmentMatchMessages, parseSegmentMatches } from '../shared/script-segments.mjs';
-import { analyzeBatchMusic } from '../shared/batch-music.mjs';
-import { buildJianyingAIRequest, DEFAULT_GEMINI_BASE_URL } from '../electron/jianying-ai.mjs';
+import { createApiService } from '../shared/api-service.mjs';
+import { buildJianyingAIRequest } from '../electron/jianying-ai.mjs';
 import { webAIScriptPrompt } from '../shared/web-ai-prompts.mjs';
+import { webAIProvider, isWebAIPage } from '../shared/web-ai.mjs';
 import { webAIPageScript } from '../electron/web-ai-dom.mjs';
+import { createWebAnalysis } from '../electron/web-ai-analysis.mjs';
+import { validateScoreRequest, parseScoreResponse, materialTexts } from '../shared/script-score.mjs';
+import { parseKeywords } from '../shared/library-match.mjs';
 import { normalizeSubtitlePunctuation } from '../shared/period-text.mjs';
 import { musicFileStem } from '../shared/music-filename.mjs';
 
@@ -57,13 +56,39 @@ if (wv && !window.blackObsidian) {
     }
   });
 
-  // Upstream CORS-free fetch via Native C# Host
+  // Upstream CORS-free fetch via Native C# Host with AbortSignal propagation
   const hostFetch = async (url: string | URL, options: any = {}) => {
-    const res = await invokeHost('http-fetch', {
-      url: String(url),
+    const signal: AbortSignal | undefined = options?.signal;
+    if (signal?.aborted) {
+      throw signal.reason || new DOMException('已取消', 'AbortError');
+    }
+    const urlStr = String(url);
+    const isLocal = urlStr.startsWith('http://127.0.0.1') || urlStr.startsWith('http://localhost');
+    const payload = {
+      url: urlStr,
       method: options.method || 'GET',
       headers: options.headers || {},
       body: options.body ? String(options.body) : '',
+      timeoutMs: isLocal ? 720000 : 240000,
+    };
+    const res = await new Promise<any>((resolve, reject) => {
+      let settled = false;
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        reject(signal?.reason || new DOMException('已取消', 'AbortError'));
+      };
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      invokeHost('http-fetch', payload).then(
+        val => {
+          if (signal) signal.removeEventListener('abort', onAbort);
+          if (!settled) { settled = true; resolve(val); }
+        },
+        err => {
+          if (signal) signal.removeEventListener('abort', onAbort);
+          if (!settled) { settled = true; reject(err); }
+        }
+      );
     });
     return {
       ok: Boolean(res.ok),
@@ -139,277 +164,33 @@ if (wv && !window.blackObsidian) {
     }
   }
 
-  // API Plugin logic running in-renderer with hostFetch
-  function normalizeBaseUrl(value: string) {
-    if (typeof value !== 'string' || !value.trim()) throw new Error('请先填写 Base URL。');
-    const url = new URL(value.trim());
-    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Base URL 只支持 http 或 https 地址。');
-    return url;
-  }
-  function endpointUrl(baseUrl: string, endpoint: string) {
-    const url = normalizeBaseUrl(baseUrl);
-    const suffix = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    if (!url.pathname.replace(/\/+$/, '').endsWith(suffix)) {
-      url.pathname = `${url.pathname.replace(/\/+$/, '')}${suffix}`;
-    }
-    return url;
-  }
-  function sunoEndpointUrl(baseUrl: string, endpoint: string) {
-    const url = normalizeBaseUrl(baseUrl);
-    url.pathname = url.pathname.replace(/\/v1(?:\/chat\/completions)?\/?$/i, '').replace(/\/suno\/?$/i, '').replace(/\/+$/, '');
-    url.pathname = `${url.pathname}/suno/${endpoint.replace(/^\/+/, '')}` || '/';
-    return url;
-  }
-  function providerBaseUrl(provider: any) {
-    if (provider?.protocol === 'deepseek' && (!provider.baseUrl || !String(provider.baseUrl).trim())) {
-      return 'https://api.deepseek.com';
-    }
-    if (provider?.protocol === 'gemini' && (!provider.baseUrl || !String(provider.baseUrl).trim())) {
-      return DEFAULT_GEMINI_BASE_URL;
-    }
-    return provider?.baseUrl;
-  }
-  function buildProviderRequest(provider: any, model: string, messages: any[]) {
-    const protocol = provider.protocol || 'openai';
-    const rawBaseUrl = providerBaseUrl(provider);
-    const url = endpointUrl(
-      rawBaseUrl,
-      protocol === 'anthropic' ? '/messages' : protocol === 'gemini' ? `/models/${encodeURIComponent(model)}:generateContent` : '/chat/completions'
-    );
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    let body: any;
-    if (protocol === 'anthropic') {
-      headers['x-api-key'] = provider.apiKey;
-      headers['anthropic-version'] = '2023-06-01';
-      const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-      body = { model, max_tokens: 2048, messages: messages.filter(m => m.role !== 'system'), ...(system ? { system } : {}) };
-    } else if (protocol === 'gemini') {
-      headers['x-goog-api-key'] = provider.apiKey;
-      const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
-      body = {
-        contents: messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-        ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-      };
-    } else {
-      headers.Authorization = `Bearer ${provider.apiKey}`;
-      body = { model, messages };
-    }
-    return { url, headers, body };
-  }
-  function extractText(protocol: string, payload: any) {
-    if (protocol === 'anthropic') return (payload?.content || []).filter((i: any) => i.type === 'text').map((i: any) => i.text).join('');
-    if (protocol === 'gemini') return (payload?.candidates?.[0]?.content?.parts || []).map((i: any) => i.text || '').join('');
-    const content = payload?.choices?.[0]?.message?.content;
-    return typeof content === 'string' ? content : Array.isArray(content) ? content.map((i: any) => i.text || '').join('') : '';
-  }
-  async function requestProvider(provider: any, model: string, messages: any[]) {
-    if (!provider?.apiKey?.trim()) throw new Error('请先填写 API 密钥。');
-    const { url, headers, body } = buildProviderRequest(provider, model, messages);
-    const response = await hostFetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-    const text = await response.text();
-    let payload: any;
-    try { payload = JSON.parse(text); } catch { payload = { message: text.slice(0, 500) }; }
-    if (!response.ok) {
-      const detail = payload?.error?.message || payload?.message || payload?.msg || `服务返回 HTTP ${response.status}`;
-      throw new Error(`连接失败（${response.status}）：${String(detail).slice(0, 400)}`);
-    }
-    return { payload, text: extractText(provider.protocol || 'openai', payload) };
-  }
+  // Shared API dispatcher + in-renderer WebAI orchestrator
+  const apiDispatch = createApiService(hostFetch, (id: string, phase: string) => {
+    window.dispatchEvent(new CustomEvent('xm-batch-analysis-stage', { detail: { id, phase } }));
+  });
 
-  const sunoHeaders = (provider: any) => {
-    const h: Record<string, string> = { 'Content-Type': 'application/json' };
-    h['Auth' + 'orization'] = 'Bearer ' + String(provider?.apiKey || '');
-    return h;
-  };
-
-  function compareGeminiModels(a: string, b: string): number {
-    const getVer = (s: string) => {
-      const m = s.match(/gemini-(\d+(?:\.\d+)?)/i);
-      return m ? parseFloat(m[1]) : 0;
-    };
-    const verA = getVer(a);
-    const verB = getVer(b);
-    if (verA !== verB) return verB - verA;
-    const isLiteA = /-lite/i.test(a);
-    const isLiteB = /-lite/i.test(b);
-    if (isLiteA !== isLiteB) return isLiteA ? 1 : -1;
-    const isFlashA = /flash/i.test(a);
-    const isFlashB = /flash/i.test(b);
-    if (isFlashA !== isFlashB) return isFlashA ? -1 : 1;
-    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
-  }
-
-  async function handleLocalApi(pathname: string, body: any) {
-    if (pathname === '/api/providers/models') {
-      const provider = body.provider || {};
-      if (!provider?.apiKey?.trim()) throw new Error('请先填写 API 密钥。');
-      const protocol = provider.protocol || 'openai';
-      if (protocol === 'gemini') {
-        const rawBaseUrl = (!provider.baseUrl || !String(provider.baseUrl).trim())
-          ? DEFAULT_GEMINI_BASE_URL
-          : provider.baseUrl;
-        const url = endpointUrl(rawBaseUrl, '/models');
-        url.searchParams.set('key', provider.apiKey.trim());
-        const resp = await hostFetch(url.toString(), {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': provider.apiKey.trim() },
+  let webAiVisible = false;
+  let webAiProvider = 'deepseek';
+  const webAnalysis = createWebAnalysis({
+    driver: {
+      visible: (id: string) => webAiVisible && webAiProvider === id,
+      run: async (id: string, input: any, signal?: AbortSignal) => {
+        if (signal?.aborted) throw signal.reason || new DOMException('已取消', 'AbortError');
+        const host = webAIProvider(id).host;
+        const res = await invokeHost('web-ai-action', {
+          id,
+          action: 'exec',
+          script: webAIPageScript({ ...input, host }),
         });
-        const raw = await resp.text();
-        if (!resp.ok) throw new Error(`获取 Gemini 模型失败 (HTTP ${resp.status})`);
-        let payload: any;
-        try { payload = JSON.parse(raw); } catch { payload = {}; }
-        const rawModels = Array.isArray(payload?.models) ? payload.models : [];
-        const filtered = rawModels
-          .filter((m: any) => {
-            const name = String(m.name || m.id || '').replace(/^models\//, '');
-            if (!name) return false;
-            const lower = name.toLowerCase();
-            // 只要 gemini 模型
-            if (!lower.includes('gemini')) return false;
-            // 排除非文字模型（向量模型、图像生成模型、语音模型等）
-            if (lower.includes('embedding') || lower.includes('embed')) return false;
-            if (lower.includes('imagen') || lower.includes('image')) return false;
-            if (lower.includes('tts') || lower.includes('whisper') || lower.includes('audio-only')) return false;
-            // 文字生成模型：如果 API 返回了 supportedGenerationMethods，必须支持 generateContent
-            if (Array.isArray(m.supportedGenerationMethods) && !m.supportedGenerationMethods.includes('generateContent')) {
-              return false;
-            }
-            return true;
-          })
-          .map((m: any) => String(m.name || m.id || '').replace(/^models\//, ''))
-          .filter(Boolean);
-        filtered.sort(compareGeminiModels);
-        return { ok: true, models: [...new Set(filtered)] };
-      } else {
-        const url = endpointUrl(providerBaseUrl(provider), '/models');
-        const resp = await hostFetch(url.toString(), {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.apiKey.trim()}` },
-        });
-        const raw = await resp.text();
-        if (!resp.ok) throw new Error(`获取模型失败 (HTTP ${resp.status})`);
-        let payload: any;
-        try { payload = JSON.parse(raw); } catch { payload = {}; }
-        const list = (Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : [])
-          .map((m: any) => (typeof m === 'string' ? m : m.id || m.name || ''))
-          .filter(Boolean);
-        const isGeminiCard = /gemini/i.test(provider.name || '');
-        const filteredList = isGeminiCard
-          ? list.filter((m: string) => /gemini/i.test(m) && !/embedding|embed|imagen|tts|whisper/i.test(m))
-          : list.filter((m: string) => !/embedding|embed|dall-e|tts|whisper/i.test(m));
-        if (isGeminiCard) {
-          filteredList.sort(compareGeminiModels);
-        } else {
-          filteredList.sort((a: string, b: string) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
-        }
-        return { ok: true, models: [...new Set(filteredList)] };
-      }
-    }
-    if (pathname === '/api/providers/test') {
-      const startedAt = Date.now();
-      if (body.provider?.protocol === 'suno' || /^suno[_-]/i.test(String(body.model || ''))) {
-        const probeUrl = sunoEndpointUrl(body.provider.baseUrl, 'fetch');
-        const resp = await hostFetch(probeUrl, {
-          method: 'POST',
-          headers: sunoHeaders(body.provider),
-          body: JSON.stringify({ ids: ['connection-probe'] }),
-        });
-        if (resp.status === 401 || resp.status === 403) throw new Error(`Suno 密钥验证失败 (HTTP ${resp.status})`);
-        return { ok: true, model: body.model, latencyMs: Date.now() - startedAt, message: `Suno 异步接口可达 (${body.model})` };
-      }
-      const result = await requestProvider(body.provider, body.model, [{ role: 'user', content: '请只回复 OK。' }]);
-      return { ok: true, model: body.model, latencyMs: Date.now() - startedAt, preview: result.text.slice(0, 120) };
-    }
-    if (pathname === '/api/chat') {
-      const startedAt = Date.now();
-      const result = await requestProvider(body.provider, body.model, body.messages || []);
-      return { text: result.text, model: body.model, latencyMs: Date.now() - startedAt };
-    }
-    if (pathname === '/api/script/score') {
-      const input = validateScoreRequest(body);
-      if (input.segmented) {
-        const result = await requestProvider(body.provider, body.model, segmentMessages(input, 'suno'));
-        try {
-          return { segments: parseSegments(result.text, input, 'suno') };
-        } catch (err: any) {
-          const retried = await requestProvider(body.provider, body.model, segmentRetryMessages(input, 'suno', result.text, err?.message));
-          return { segments: parseSegments(retried.text, input, 'suno') };
-        }
-      }
-      const result = await requestProvider(body.provider, body.model, scoreMessages(input));
-      return { score: parseScoreResponse(result.text, input.durationSeconds) };
-    }
-    if (pathname === '/api/script/library-match') {
-      const input = validateLibraryInput(body);
-      if (input.segmented) {
-        const planned = await requestProvider(body.provider, body.model, segmentMessages(input, 'library'));
-        let parsedSegments;
-        try {
-          parsedSegments = parseSegments(planned.text, input, 'library');
-        } catch (err: any) {
-          const retried = await requestProvider(body.provider, body.model, segmentRetryMessages(input, 'library', planned.text, err?.message));
-          parsedSegments = parseSegments(retried.text, input, 'library');
-        }
-        const candidates = segmentCandidates(input, parsedSegments);
-        let segments;
-        if (candidates.some((s: any) => s.candidates.length)) {
-          const matched = await requestProvider(body.provider, body.model, segmentMatchMessages(input, candidates));
-          segments = parseSegmentMatches(matched.text, candidates);
-        } else {
-          segments = candidates.map(({ candidates: _c, ...seg }: any) => ({ ...seg, matches: [], evaluated: 0 }));
-        }
-        return {
-          segments,
-          matches: [],
-          analysis: { summary: `剧本已分为 ${segments.length} 个情节，各段音乐推荐见下方。`, keywords: [...new Set(segments.flatMap((s: any) => s.keywords))].slice(0, 30) },
-          total: input.tracks.length,
-          evaluated: candidates.reduce((n: number, s: any) => n + s.candidates.length, 0),
-        };
-      }
-      const keywordsResult = await requestProvider(body.provider, body.model, keywordMessages(input));
-      const analysis = parseKeywords(keywordsResult.text);
-      const candidates = shortlistTracks(input.tracks, analysis.keywords, input.customKeywords);
-      let matches: any[] = [];
-      if (candidates.length) {
-        const matchResult = await requestProvider(body.provider, body.model, matchMessages(input, analysis, candidates));
-        matches = parseMatches(matchResult.text, candidates);
-      }
-      return { analysis, matches, customKeywords: input.customKeywords, total: input.tracks.length, evaluated: candidates.length };
-    }
-    if (pathname === '/api/script/batch-library-match') {
-      return analyzeBatchMusic(
-        body,
-        async (messages: any[]) => (await requestProvider(body.provider, body.model, messages)).text,
-        { deepseekApi: body.provider?.protocol === 'deepseek' }
-      );
-    }
-    if (pathname === '/api/music/generate') {
-      const options = normalizeMusicOptions(body);
-      const url = sunoEndpointUrl(body.provider.baseUrl, 'submit/music');
-      const sunoBody = buildSunoBody(body.model, options);
-      const resp = await hostFetch(url, {
-        method: 'POST',
-        headers: sunoHeaders(body.provider),
-        body: JSON.stringify(sunoBody),
-      });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error?.message || payload?.message || `Suno 提交失败 (${resp.status})`);
-      return { tracks: getSunoSongs(payload) };
-    }
-    if (pathname === '/api/music/query') {
-      const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
-      const url = sunoEndpointUrl(body.provider.baseUrl, 'fetch');
-      const resp = await hostFetch(url, {
-        method: 'POST',
-        headers: sunoHeaders(body.provider),
-        body: JSON.stringify({ ids }),
-      });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error?.message || `Suno 查询失败 (${resp.status})`);
-      return { tracks: getSunoSongs(payload) };
-    }
-    throw new Error('未知 API 路径: ' + pathname);
-  }
+        if (signal?.aborted) throw signal.reason || new DOMException('已取消', 'AbortError');
+        return res?.result || {};
+      },
+    },
+    notify: (task: any) => {
+      emitLocal('bos:web-analysis-task', task);
+    },
+    copy: (text: string) => invokeHost('copy-plain', { text }),
+  });
 
   const origFetch = window.fetch.bind(window);
   window.fetch = async (input: any, init?: any) => {
@@ -418,23 +199,49 @@ if (wv && !window.blackObsidian) {
       const pathname = new URL(urlStr, window.location.origin).pathname;
       try {
         const rawBody = init?.body ? JSON.parse(String(init.body)) : {};
-        const result = await handleLocalApi(pathname, rawBody);
-        return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        const { status, body } = await apiDispatch(pathname, rawBody, init?.signal);
+        return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
       } catch (err: any) {
-        return new Response(JSON.stringify({ error: err?.message || 'API 请求失败' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ error: err?.message || 'API 请求失败' }), {
+          status: Number(err?.status) || 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
     }
     return origFetch(input, init);
   };
 
   window.blackObsidian = {
-    layoutWebAI: (input: any) => invokeHost('web-ai-layout', input),
-    webAIAction: (id: string, action: string) => invokeHost('web-ai-action', { id, action, script: webAIPageScript({ command: action === 'login' ? 'login' : 'probe', host: id === 'doubao' ? 'www.doubao.com' : 'chat.deepseek.com' }) }),
+    layoutWebAI: async (input: any) => {
+      if (input?.provider) webAiProvider = input.provider;
+      const res = await invokeHost('web-ai-layout', input);
+      webAiVisible = Boolean(input?.visible && res && res.visible !== false);
+      if (!input?.visible) webAiVisible = false;
+      return res;
+    },
+    webAIAction: async (id: string, action: string) => {
+      const info = webAIProvider(id);
+      const cmd = action === 'login' ? 'login' : action === 'page-status' ? 'probe' : '';
+      const res = await invokeHost('web-ai-action', {
+        id,
+        action,
+        ...(cmd ? { script: webAIPageScript({ command: cmd, host: info.host }) } : {}),
+      });
+      if (res && typeof res.visible === 'boolean') webAiVisible = res.visible;
+      if (res?.result?.state && res.result.state !== 'ready' && res.result.message) {
+        res.pageNotice = res.result.message;
+      } else if (res?.url && !res.loading && !isWebAIPage(id, res.url)) {
+        res.pageNotice = `当前页面不在 ${info.name} 官方域名下，请点击「首页」返回。`;
+      }
+      return res;
+    },
     copyWebAITask: (draft: any, purpose: string) => invokeHost('copy-plain', { text: webAIScriptPrompt(draft, purpose) }),
-    analyzeWebScript: (request: any) => invokeHost('web-analysis-start', request),
-    getWebAnalysisTask: () => invokeHost('web-analysis-status', {}),
-    webAnalysisAction: (id: string, action: string, value: any) => invokeHost('web-analysis-action', { id, action, value }),
+    analyzeWebScript: (request: any) => webAnalysis.run(request),
+    getWebAnalysisTask: async () => webAnalysis.snapshot(),
+    webAnalysisAction: (id: string, action: string, value: any) => webAnalysis.action(id, action, value),
     onWebAnalysisTask: (cb: any) => onEvent('bos:web-analysis-task', cb),
+    localModelAction: (action: string, model?: string) => invokeHost('local-model-action', { action, model: model || '' }),
+    onLocalModelProgress: (cb: any) => onEvent('bos:local-model-progress', cb),
 
     getWatermarkState: () => invokeHost('watermark:get-state'),
     chooseWatermarkVideos: () => invokeHost('watermark:choose-videos'),

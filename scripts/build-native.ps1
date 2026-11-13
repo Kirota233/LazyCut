@@ -36,11 +36,12 @@ try {
     $engineAutomation = Join-Path $repoRoot 'app/native/JianYingAutomation.cs'
     $engineDraftIo = Join-Path $repoRoot 'app/native/JianYingDraftIO.cs'
     $enginePunctuation = Join-Path $repoRoot 'app/native/JianYingPunctuation.cs'
+    $engineSubtitleSplit = Join-Path $repoRoot 'app/native/JianYingSubtitleSplit.cs'
     & $compiler /nologo /utf8output /codepage:65001 /target:exe /platform:x64 /optimize+ `
         /r:System.Web.Extensions.dll `
         /r:System.Drawing.dll `
         /r:System.Windows.Forms.dll `
-        ('/out:' + $engineExe) $engineSource $engineScan $engineProgress $engineAutomation $engineDraftIo $enginePunctuation
+        ('/out:' + $engineExe) $engineSource $engineScan $engineProgress $engineAutomation $engineDraftIo $enginePunctuation $engineSubtitleSplit
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $engineExe)) {
         throw 'JianYingEngine C# compilation failed.'
     }
@@ -76,6 +77,8 @@ try {
     $hostExeName = 'LazyCut.exe'
     $hostExe = Join-Path $hostOutDir $hostExeName
     $hostSource = Join-Path $repoRoot 'app/native/XMStudioHost.cs'
+    $localModelsSource = Join-Path $repoRoot 'app/native/LocalModels.cs'
+    $localHardwareSource = Join-Path $repoRoot 'app/native/LocalHardware.cs'
     $wvCore = Join-Path $repoRoot 'app/lib/webview2/Microsoft.Web.WebView2.Core.dll'
     $wvWinForms = Join-Path $repoRoot 'app/lib/webview2/Microsoft.Web.WebView2.WinForms.dll'
     $appIcon = Join-Path $repoRoot 'app/assets/app-icon.ico'
@@ -83,10 +86,14 @@ try {
         /r:System.Web.Extensions.dll `
         /r:System.Drawing.dll `
         /r:System.Windows.Forms.dll `
+        /r:System.Net.Http.dll `
+        /r:System.IO.Compression.dll `
+        /r:System.IO.Compression.FileSystem.dll `
+        /r:System.Management.dll `
         ('/r:' + $wvCore) `
         ('/r:' + $wvWinForms) `
         ('/win32icon:' + $appIcon) `
-        ('/out:' + $hostExe) $hostSource
+        ('/out:' + $hostExe) $hostSource $localModelsSource $localHardwareSource
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostExe)) {
         throw 'XMStudioHost C# compilation failed.'
     }

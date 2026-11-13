@@ -47,7 +47,7 @@ function getRuntime() {
     getProvider: (id: string) => providersNow.find(p => p.id === id),
     request: async (url: string, body: any) => {
       if (url === '/api/script/score') {
-        return requestScriptAnalysis('score', body, webAnalyzer(body.provider) ? undefined : AbortSignal.timeout(135000));
+        return requestScriptAnalysis('score', body, webAnalyzer(body.provider) ? undefined : AbortSignal.timeout(body.provider?.protocol === 'ollama' ? 720000 : 135000));
       }
       const response = await fetch(url, {
         method: 'POST',
@@ -314,7 +314,7 @@ export function ScriptAutomation({ providers, automation, onNavigate }: ScriptAu
         {!list.length && <option value="">先添加模型与连接</option>}
         {list.map(m => (
           <option key={m.key} value={m.key} title={m.model}>
-            {m.label || `${m.model} · ${m.provider.name}`}
+            {m.label || `${m.model} · ${m.provider.protocol === 'ollama' ? '本地部署' : m.provider.name}`}
           </option>
         ))}
       </select>

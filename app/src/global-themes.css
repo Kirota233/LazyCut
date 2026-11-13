@@ -118,9 +118,13 @@
 .app-shell[data-bos-theme] :is(input,textarea)::placeholder {color:var(--ui-muted);opacity:.85}
 .app-shell[data-bos-theme] :is(.field-group input:focus,.dialog-form input:focus,.chat-composer:focus-within) {border-color:var(--ui-accent);background:var(--ui-input)}
 .app-shell[data-bos-theme] :is(.icon-button,.reveal-button,.model-add-button,.select-wrap svg) {color:var(--ui-muted);border-radius:var(--ui-control)}
-.app-shell[data-bos-theme] :is(.icon-button:hover,.model-add-button:hover,.model-menu>button:hover,.recent-row:hover) {background:var(--ui-raised);color:var(--ui-text);border-color:var(--ui-border)}
+.app-shell[data-bos-theme] :is(.icon-button:hover,.model-add-button:hover,.model-menu>button:not(.model-fetch-action):hover,.recent-row:hover) {background:var(--ui-soft);color:var(--ui-accent);border-color:var(--ui-border)}
 .app-shell[data-bos-theme] :is(.model-chip,.prompt-suggestions button,.button-quiet,.model-menu) {color:var(--ui-text);background:var(--ui-raised);border-color:var(--ui-border);border-radius:var(--ui-control)}
-.app-shell[data-bos-theme] :is(.model-chip svg,.model-menu>button) {color:var(--ui-text)}
+.app-shell[data-bos-theme] :is(.model-chip svg,.model-menu>button:not(.model-fetch-action),.model-menu-list button,.model-menu-item,.model-menu-item svg) {color:var(--ui-text)}
+.app-shell[data-bos-theme] :is(.model-menu-list button:hover,.model-menu-item:hover) {background:var(--ui-soft);color:var(--ui-accent)}
+.app-shell[data-bos-theme] :is(.model-menu-list button:hover svg,.model-menu-item:hover svg) {color:var(--ui-accent)}
+.app-shell[data-bos-theme] button.model-fetch-action {border:1px dashed var(--ui-border);background:var(--ui-soft);color:color-mix(in srgb,var(--ui-accent) 76%,var(--ui-text))}
+.app-shell[data-bos-theme] button.model-fetch-action:hover:not(:disabled) {background:var(--ui-surface);border-color:var(--ui-accent);color:color-mix(in srgb,var(--ui-accent) 76%,var(--ui-text))}
 .app-shell[data-bos-theme] .remove-button {border-color:var(--ui-border)}
 .app-shell[data-bos-theme] .remove-button:hover {color:var(--ui-danger);background:var(--ui-danger-bg)}
 .app-shell[data-bos-theme] :is(.provider-mark.custom,.summary-icon,.recent-icon,.recent-icon.music,.chat-sparkle,.dialog-icon,.message-avatar.assistant) {color:var(--ui-accent);background:var(--ui-soft);border-color:var(--ui-border);border-radius:var(--ui-control)}

@@ -1,18 +1,23 @@
 import { normalizeMusicOptions, buildSunoBody } from '../shared/music-options.mjs';
 import { getSunoSongs } from '../server/suno-response.mjs';
-import { isScriptAnalysisModel, scoreMessages, parseScoreResponse, validateScoreRequest } from '../shared/script-score.mjs';
+import { isScriptAnalysisModel, isLocalQwenModel, scoreMessages, parseScoreResponse, validateScoreRequest } from '../shared/script-score.mjs';
 import { validateLibraryInput, keywordMessages, parseKeywords, shortlistTracks, matchMessages, parseMatches } from '../shared/library-match.mjs';
 import { analyzeWithWeb } from '../shared/web-script-analysis.mjs';
 import { analyzeBatchMusic } from '../shared/batch-music.mjs';
 import { segmentMessages, parseSegments, planSegments, segmentCandidates, segmentMatchMessages, parseSegmentMatches } from '../shared/script-segments.mjs';
+import { readLocalModelSettings } from '../shared/local-model-settings.mjs';
 
 const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
+const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+const OLLAMA_BASE_URL = 'http://127.0.0.1:11435/v1';
 
 // Protocol and validation are shared by the legacy server and the native renderer.
-export function createApiService(fetch = globalThis.fetch) {
+export function createApiService(fetch = globalThis.fetch, onBatchStage = () => {}) {
 function providerBaseUrl(provider) {
   if (provider?.protocol === 'deepseek') return DEEPSEEK_BASE_URL;
+  if (provider?.protocol === 'qwen') return QWEN_BASE_URL;
+  if (provider?.protocol === 'ollama') return OLLAMA_BASE_URL;
   return provider?.protocol === 'gemini' && !provider.baseUrl?.trim()
     ? DEFAULT_GEMINI_BASE_URL : provider?.baseUrl;
 }
@@ -46,7 +51,7 @@ function validateProvider(provider, model, allowSuno = false) {
   if (!provider || typeof provider !== "object") {
     throw Object.assign(new Error("找不到供应商配置。"), { status: 400 });
   }
-  if (!provider.apiKey?.trim()) {
+  if (provider.protocol !== 'ollama' && !provider.apiKey?.trim()) {
     throw Object.assign(new Error("请先填写 API 密钥。"), { status: 400 });
   }
   if (typeof model !== "string" || !model.trim()) {
@@ -79,15 +84,16 @@ async function requestProviderModels(provider) {
   if (!provider || typeof provider !== 'object') {
     throw Object.assign(new Error('找不到供应商配置。'), { status: 400 });
   }
-  if (!provider.apiKey?.trim()) {
+  if (provider.protocol !== 'ollama' && !provider.apiKey?.trim()) {
     throw Object.assign(new Error('请先填写 API 密钥。'), { status: 400 });
   }
   const protocol = provider.protocol || 'openai';
-  if (!['gemini', 'deepseek', 'openai', 'custom', 'anthropic'].includes(protocol)) {
+  if (!['gemini', 'deepseek', 'deepseek-relay', 'qwen', 'openai', 'custom', 'anthropic', 'ollama'].includes(protocol)) {
     throw Object.assign(new Error('此协议不提供模型列表，请手动添加模型 ID。'), { status: 400 });
   }
   const url = endpointUrl(providerBaseUrl(provider), '/models');
-  const headers = protocol === 'gemini'
+  const headers = protocol === 'ollama' ? {}
+    : protocol === 'gemini'
     ? { 'x-goog-api-key': provider.apiKey }
     : protocol === 'anthropic'
       ? { 'x-api-key': provider.apiKey, 'anthropic-version': '2023-06-01' }
@@ -113,10 +119,11 @@ async function requestProviderModels(provider) {
     .map(name => String(name).replace(/^models\//, ''))
     .filter(name => protocol === 'gemini'
       ? /^gemini-/i.test(name) && !/embedding|embed|imagen|image|tts|whisper|audio-only/i.test(name)
+      : protocol === 'qwen' ? isScriptAnalysisModel(provider, name)
       : name && !/embedding|embed|tts|whisper/i.test(name));
   if (protocol === 'gemini') {
     models.sort(compareGeminiModels);
-  } else if (protocol === 'openai' || protocol === 'custom') {
+  } else if (['openai', 'custom', 'deepseek-relay'].includes(protocol)) {
     models.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
   }
   return [...new Set(models)];
@@ -218,6 +225,19 @@ async function requestSunoModelTest(provider, model) {
 
 function buildProviderRequest(provider, model, messages, structured = false) {
   const protocol = provider.protocol || "openai";
+  if (protocol === 'ollama') {
+    const settings = readLocalModelSettings();
+    return {
+      url: new URL('/api/chat', OLLAMA_BASE_URL),
+      headers: { 'Content-Type': 'application/json' },
+      body: {
+        model, messages, stream: false,
+        ...(isLocalQwenModel(model) ? { think: false } : {}),
+        ...(structured ? { format: typeof structured === 'object' ? structured : 'json' } : {}),
+        options: { num_ctx: settings.contextTokens, num_predict: settings.outputTokens, ...(structured ? { temperature: 0 } : {}) },
+      },
+    };
+  }
   const url = endpointUrl(
     providerBaseUrl(provider),
     protocol === "anthropic"
@@ -251,14 +271,24 @@ function buildProviderRequest(provider, model, messages, structured = false) {
       ...(structured ? { generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 16384 } } : {}),
     };
   } else {
-    headers.Authorization = `Bearer ${provider.apiKey}`;
-    body = { model, messages, ...(protocol === 'deepseek' ? { max_tokens: 8192 } : {}) };
+    if (protocol !== 'ollama') headers.Authorization = `Bearer ${provider.apiKey}`;
+    body = { model, messages, ...(['deepseek', 'deepseek-relay', 'qwen'].includes(protocol) ? { max_tokens: 8192 } : {}), ...(['deepseek', 'deepseek-relay', 'qwen'].includes(protocol) && structured ? { response_format: { type: 'json_object' } } : {}) };
+    // Qwen structured output requires non-thinking mode, including models whose
+    // default mode may change when an alias is updated by the provider.
+    if (protocol === 'qwen') {
+      body.enable_thinking = false;
+      // The upstream JSON mode also requires the literal word JSON in a message.
+      if (structured && !messages.some(message => /json/i.test(message.content))) {
+        body.messages = [{ role: 'system', content: '只返回一个合法 JSON 对象。' }, ...messages];
+      }
+    }
   }
 
   return { url, headers, body };
 }
 
 function extractText(protocol, payload) {
+  if (protocol === 'ollama') return payload?.message?.content || '';
   if (protocol === "anthropic") {
     return (payload?.content || []).filter((item) => item.type === "text").map((item) => item.text).join("");
   }
@@ -274,6 +304,7 @@ function extractText(protocol, payload) {
 async function requestProvider(provider, model, messages, timeoutMs = 120_000, signal, structured = false) {
   validateProvider(provider, model);
   const { url, headers, body } = buildProviderRequest(provider, model, messages, structured);
+  if (provider.protocol === 'ollama') timeoutMs = Math.max(timeoutMs, 720_000);
   let response;
   try {
     response = await fetch(url, {
@@ -296,11 +327,20 @@ async function requestProvider(provider, model, messages, timeoutMs = 120_000, s
     payload = { message: text.slice(0, 500) };
   }
   if (!response.ok) {
-    let detail = payload?.error?.message || payload?.message || payload?.msg || `服务返回 HTTP ${response.status}`;
+    let detail = payload?.error?.message || (typeof payload?.error === 'string' ? payload.error : '') || payload?.message || payload?.msg || `服务返回 HTTP ${response.status}`;
     if (provider.apiKey) detail = String(detail).replaceAll(provider.apiKey, "••••••••");
     throw Object.assign(new Error(`连接失败（${response.status}）：${String(detail).slice(0, 400)}`), { status: 502 });
   }
-  return { payload, text: extractText(provider.protocol || "openai", payload), finishReason: payload?.candidates?.[0]?.finishReason || payload?.choices?.[0]?.finish_reason || payload?.stop_reason || '' };
+  const answer = extractText(provider.protocol || "openai", payload);
+  const finishReason = payload?.candidates?.[0]?.finishReason || payload?.choices?.[0]?.finish_reason || payload?.done_reason || payload?.stop_reason || '';
+  if (provider.protocol === 'qwen') {
+    if (finishReason === 'length') throw Object.assign(new Error('千问 API 输出达到长度上限，分析未完成；请减少本批集数、分段数或缩短剧本后重试。'), { status: 502 });
+    if (!answer.trim()) throw Object.assign(new Error('千问 API 返回空白内容，请检查模型连接后重试。'), { status: 502 });
+  }
+  if (provider.protocol === 'ollama' && structured && finishReason === 'length') {
+    throw Object.assign(new Error('本地模型已达到输出 token 上限，未返回完整分析。请在“本地部署”提高最大输出 token，或缩短本集剧本。'), { status: 502 });
+  }
+  return { payload, text: provider.protocol === 'ollama' ? answer.replace(/^\s*<think>[\s\S]*?<\/think>\s*/i, '') : answer, finishReason };
 }
 
 function asTrack(song) {
@@ -540,12 +580,16 @@ signal.throwIfAborted();
     if (!isScriptAnalysisModel(body.provider, body.model)) throw Object.assign(new Error('请选择可用的剧本分析模型。'), { status: 400 });
     const abort = { signal };
     try {
-      const result = await analyzeBatchMusic(body, async messages => {
+      const result = await analyzeBatchMusic(body, async (messages, _label, schema) => {
         abort.signal.throwIfAborted();
-        const result = await requestProvider(body.provider, body.model, messages, 240_000, abort.signal);
+        const result = await requestProvider(body.provider, body.model, messages, 240_000, abort.signal, body.provider.protocol === 'ollama' && schema === false ? false : body.provider.protocol === 'ollama' && schema ? schema : ['deepseek', 'deepseek-relay', 'qwen', 'ollama'].includes(body.provider.protocol));
         abort.signal.throwIfAborted();
+        if (['deepseek', 'deepseek-relay'].includes(body.provider.protocol)) {
+          if (result.finishReason === 'length') throw Object.assign(new Error('DeepSeek API 输出达到长度上限，音乐匹配未完成；请减少本批集数或分段数后重试。'), { status: 502 });
+          if (!result.text.trim()) throw Object.assign(new Error(`DeepSeek API 返回空白内容${result.finishReason ? `（${result.finishReason}）` : ''}；请检查模型连接后重试。`), { status: 502 });
+        }
         return result.text;
-      }, { deepseekApi: body.provider.protocol === 'deepseek' });
+      }, { deepseekApi: ['deepseek', 'deepseek-relay', 'qwen', 'ollama'].includes(body.provider.protocol), localModel: body.provider.protocol === 'ollama', onStage: phase => onBatchStage(body.progressId, phase) });
       return reply(200, result);
     } finally {}
   }
@@ -554,9 +598,18 @@ signal.throwIfAborted();
     if (!isScriptAnalysisModel(body.provider, body.model)) throw Object.assign(new Error("请选择可用的剧本分析模型。"), { status: 400 });
     const abort = { signal };
     try {
+      if (body.provider.protocol === 'ollama') {
+        const result = await analyzeBatchMusic({ ...body, episodes: [{ id: 'single-script', episodeNumber: 1, title: body.title, script: body.script }] }, async (messages, _label, schema) => {
+          abort.signal.throwIfAborted();
+          const answer = await requestProvider(body.provider, body.model, messages, 240_000, abort.signal, schema || true);
+          abort.signal.throwIfAborted();
+          return answer.text;
+        }, { localModel: true, deepseekApi: true });
+        return reply(200, { ...result.episodes[0].value, customKeywords: validateLibraryInput(body).customKeywords });
+      }
       const result = await analyzeWithWeb('library-match', body, async messages => {
         abort.signal.throwIfAborted();
-        const answer = await requestProvider(body.provider, body.model, messages, 120_000, abort.signal);
+        const answer = await requestProvider(body.provider, body.model, messages, 120_000, abort.signal, ['qwen', 'ollama'].includes(body.provider.protocol));
         abort.signal.throwIfAborted();
         return answer.text;
       });
@@ -574,7 +627,7 @@ signal.throwIfAborted();
         return reply(200, { segments });
       } finally {}
     }
-    const result = await requestProvider(body.provider, body.model, scoreMessages(input), 120_000, signal);
+    const result = await requestProvider(body.provider, body.model, scoreMessages(input), 120_000, signal, ['qwen', 'ollama'].includes(body.provider.protocol));
     return reply(200, { score: parseScoreResponse(result.text, input.durationSeconds) });
   }
 

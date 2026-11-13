@@ -67,6 +67,19 @@ const empty = {
   status: '正在准备本地引擎…',
 };
 
+function normalizeJianyingState(raw: any) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  return {
+    ...empty,
+    ...source,
+    queue: Array.isArray(source.queue) ? source.queue : [],
+    plan: Array.isArray(source.plan) ? source.plan : [],
+    logs: Array.isArray(source.logs) ? source.logs : [],
+    templates: Array.isArray(source.templates) ? source.templates : [],
+    waits: source.waits && typeof source.waits === 'object' ? source.waits : {},
+  };
+}
+
 export type JianyingStage = 'export' | 'subtitles' | 'rename' | 'watermark';
 
 export function JianyingStudio({ active, providers, onNavigate }: { active: boolean; providers: any[]; onNavigate: (tab: string) => void }) {
@@ -90,6 +103,19 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
   const [aiRename, setAiRename] = i.useState(false);
   const [waits, setWaits] = i.useState(null as any);
   const [templateName, setTemplateName] = i.useState('');
+  const [englishChars, setEnglishChars] = i.useState(() => {
+    const key = 'xm.jianying.subtitle.english-chars';
+    const saved = localStorage.getItem(key);
+    if (!localStorage.getItem('xm.jianying.subtitle.english-chars-calibrated')) {
+      localStorage.setItem('xm.jianying.subtitle.english-chars-calibrated', '1');
+      if (saved === null || saved === '24') {
+        localStorage.setItem(key, '22');
+        return 22;
+      }
+    }
+    return Number(localStorage.getItem(key)) || 22;
+  });
+  const [chineseChars, setChineseChars] = i.useState(() => Number(localStorage.getItem('xm.jianying.subtitle.chinese-chars')) || 12);
   const [exportOptionsCollapsed, toggleExportOptions] = usePanelCollapsed('jianying-export-options');
   const [companionVisible, setCompanionVisible] = i.useState(false);
   const [companionBusy, setCompanionBusy] = i.useState(false);
@@ -181,7 +207,7 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
           const serialized = JSON.stringify(value);
           if (serialized !== lastJson) {
             lastJson = serialized;
-            setState(value);
+            setState(normalizeJianyingState(value));
           }
           if (value.busy || value.recording || value.exporting || !value.ready) nextDelay = 1000;
         }
@@ -203,19 +229,19 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
 
   const run = (action: string, args: Record<string, any> = {}) => perform(async () => {
     if (!api?.jianyingAction) throw new Error('此功能需要桌面版的本地引擎。');
-    setState(await api.jianyingAction(action, args, connection ? { provider: connection.provider, model: connection.model } : undefined));
+    setState(normalizeJianyingState(await api.jianyingAction(action, args, connection ? { provider: connection.provider, model: connection.model } : undefined)));
   }, action);
 
   const choosePath = (key: string) => perform(async () => {
     const value = await api.chooseDirectory();
-    if (value) setState(await api.jianyingAction('paths', { [key]: value }));
+    if (value) setState(normalizeJianyingState(await api.jianyingAction('paths', { [key]: value })));
   });
 
   const chooseFiles = () => perform(async () => {
     const files = await api.chooseJianyingFiles();
     if (files) {
       setFolder('');
-      setState(await api.jianyingAction('files', { files }));
+      setState(normalizeJianyingState(await api.jianyingAction('files', { files })));
     }
   });
 
@@ -416,8 +442,8 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
                       max="600"
                       step="0.1"
                       disabled={locked || !state.ready}
-                      value={(waits || state.waits)[key] ?? ''}
-                      onChange={(event: any) => setWaits((previous: any) => ({ ...(previous || state.waits), [key]: event.target.value }))}
+                      value={(waits || state.waits || {})[key] ?? ''}
+                      onChange={(event: any) => setWaits((previous: any) => ({ ...(previous || state.waits || {}), [key]: event.target.value }))}
                     />
                   </label>
                 ))}
@@ -425,7 +451,7 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
               <button
                 type="button"
                 disabled={locked || !waits}
-                onClick={() => perform(async () => { setState(await api.jianyingAction('settings', { waits })); setWaits(null); })}
+                onClick={() => perform(async () => { setState(normalizeJianyingState(await api.jianyingAction('settings', { waits }))); setWaits(null); })}
               >
                 保存等待时间
               </button>
@@ -486,6 +512,19 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
               检测「XXX-1」复制为「XXX-2」
             </button>
           </div>
+          <section className="bos-jy-export-options">
+            <h4>拆分长字幕</h4>
+            <p>估算达到四行的字幕，优先在中点附近的逗号后拆分，逗号留在前一条；没有合适逗号则在中点附近的空格拆。过长的部分继续拆分。</p>
+            <div className="bos-jy-toolbar">
+              <label><span>英文每行字符（含空格）</span><input aria-label="英文每行字符" type="number" min="18" max="40" value={englishChars} disabled={locked} onChange={(event: any) => { setEnglishChars(event.target.value); localStorage.setItem('xm.jianying.subtitle.english-chars', event.target.value); }} /></label>
+              <label><span>中文每行字符</span><input aria-label="中文每行字符" type="number" min="8" max="25" value={chineseChars} disabled={locked} onChange={(event: any) => { setChineseChars(event.target.value); localStorage.setItem('xm.jianying.subtitle.chinese-chars', event.target.value); }} /></label>
+              <button type="button" className={pendingAct === 'split_long_subtitles' ? 'is-loading' : ''} disabled={locked || !state.ready || !state.draftDir || englishChars < 18 || englishChars > 40 || chineseChars < 8 || chineseChars > 25} onClick={() => run('split_long_subtitles', { englishChars: Number(englishChars), chineseChars: Number(chineseChars) })}>
+                {pendingAct === 'split_long_subtitles' && <span className="bos-btn-spinner" aria-hidden="true" />}
+                检查并拆分四行字幕
+              </button>
+            </div>
+            <small>预览新增条数并确认后才修改草稿；自动备份并校验。按截图中的字号和字幕框调整每行字符数，剪映实际换行仍需在草稿中检查。操作前请保存并彻底退出剪映。</small>
+          </section>
           <small>检查并还原标准标点可将保护标点（․ ﹒ ‚ ﹐）还原为标准英文 . 与 , 且保持花字样式与时间轴不变。操作前请先退出剪映，写入前自动创建安全备份。</small>
         </ToolPanel>
 

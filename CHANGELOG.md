@@ -1,3 +1,17 @@
+# LazyCut 1.8.3 更新日志
+
+## 1. 关键稳定性、主题显示与启动速度修复
+- **彻底修复粘贴剧本后程序白屏崩溃**：移除 `BatchAnalysis` 后台进度卡对独立 `@phosphor-icons/react` 运行时的引用，改用纯内联 SVG 图标（`NavigationIcons.jsx`），并在升级包构建中强制复用全局基线 `react` / `react-dom`、增加根级 `AppErrorBoundary` 异常兜底；同步补齐 `WatermarkStudio` 分辨率空值保护与 `JianyingStudio` 状态归一化保护，防止局部响应缺失触发白屏。
+- **修复浅色主题「添加模型」下拉列表对比度问题**：重构 `music-studio.css` 与 `global-themes.css` 中 `.model-menu`、`.model-menu-item` 及 `.model-fetch-action` 的主题令牌与选择器优先级，解决抹茶花园、日落蜜桃、iOS 柔和及纯色浅色主题下模型列表和「从接口拉取」按钮文字不清的问题。
+- **大幅优化冷启动速度**：延后伴侣次要动画 GIF 预加载，异步化 `EnsureVeCreatorIntegrity()` 与首次本地曲库扫描，解除 WebView2 预热对首屏窗口的阻塞，并避免启动状态轮询触发全量硬件检测。
+
+## 2. 合并上游最新能力（适配 LazyCut UI）
+- **新增「本地部署」离线模型中心**：集成原生 C# 电脑配置检测（`LocalHardware.cs` / `LocalModels.cs`）与 Ollama 本地 Qwen / DeepSeek 模型部署管理。
+- **扩展「国内 AI」四平台免 Key 工作流**：在内置免 Key 网页分析中新增对 **千问**、**Kimi** 的支持（与 DeepSeek、豆包并列切换），并完善 DeepSeek 官方/中转及千问 API 协议适配。
+- **新增剪映「检查并拆分四行字幕」**：在 `02 字幕工程` 新增原生四行字幕拆分引擎（`JianYingSubtitleSplit.cs`），并与 LazyCut 专属的 `检测「XXX-1」复制为「XXX-2」`、常驻悬浮窗及坐标偏移修复保持完整兼容。
+
+---
+
 # LazyCut 1.8.2 更新日志
 
 ## 1. 修复「📸 截图识别」草稿坐标偏移与漏识别问题

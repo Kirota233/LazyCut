@@ -4,6 +4,7 @@ import { useScriptProjects } from './ScriptProjects.jsx';
 declare const i: any;
 
 export function WebAIStudio({ active, onNavigate }: { active: boolean; onNavigate: (tab: string) => void; providers?: any[]; automation?: any }) {
+  const floating = new URLSearchParams(globalThis.location?.search || '').has('floating');
   const [manualProvider, setProvider] = i.useState(() => {
     try {
       return WEB_AI_PROVIDERS.some((p: any) => p.id === localStorage.getItem('xm.web-ai.provider'))
@@ -18,7 +19,7 @@ export function WebAIStudio({ active, onNavigate }: { active: boolean; onNavigat
   const [manualReply, setManualReply] = i.useState('');
   const taskRef = i.useRef(null as any);
   const provider = task?.provider || opened || manualProvider;
-  const visible = active || !!task || !!opened;
+  const visible = active || (!!task && !task.manualWeb) || !!opened;
   const [status, setStatus] = i.useState(null as any);
   const [error, setError] = i.useState('');
   const [notice, setNotice] = i.useState('');
@@ -37,7 +38,7 @@ export function WebAIStudio({ active, onNavigate }: { active: boolean; onNavigat
   };
 
   i.useEffect(() => {
-    if (!ready) return;
+    if (!ready || floating) return;
     if (!visible) { void api.layoutWebAI({ visible: false }).catch(() => {}); return; }
     let live = true, frame = 0, last = '', polling = false;
     setStatus(null); setError(''); setNotice('');
@@ -86,7 +87,7 @@ export function WebAIStudio({ active, onNavigate }: { active: boolean; onNavigat
       window.removeEventListener('scroll', schedule, true);
       void api.layoutWebAI({ visible: false }).catch(() => {});
     };
-  }, [visible, provider, ready]);
+  }, [visible, provider, ready, floating]);
 
   i.useEffect(() => {
     if (!api?.onWebAnalysisTask) return;
@@ -145,9 +146,12 @@ export function WebAIStudio({ active, onNavigate }: { active: boolean; onNavigat
       {(task || opened) && (
         <div className="bos-web-ai-task-heading">
           <strong>{task ? `${current.name} · ${task.stage}` : `${current.name} · 官方网页登录`}</strong>
-          <button type="button" onClick={() => task ? taskAction('cancel') : setOpened('')}>
-            {task?.kind === 'draft-scan' ? '中断扫描 · F10' : task ? '中断分析' : '返回工作空间'}
-          </button>
+          <div className="bos-script-actions">
+            {task?.manualWeb && <button type="button" onClick={() => onNavigate('batch')}>前往 DeepSeek 分析结果</button>}
+            <button type="button" onClick={() => task ? taskAction('cancel') : setOpened('')}>
+              {task?.kind === 'draft-scan' ? '中断扫描 · F10' : task ? '中断分析' : '返回工作空间'}
+            </button>
+          </div>
         </div>
       )}
       {task && (
@@ -155,13 +159,15 @@ export function WebAIStudio({ active, onNavigate }: { active: boolean; onNavigat
           <p role="status">{task.message}</p>
           <div className="bos-script-actions">
             <button type="button" onClick={() => taskAction('copy')}>复制当前任务</button>
-            <small>网页回答会自动读取并接回原任务，无需 API 配置。</small>
+            <small>{task.manualOnly ? `复制任务到 ${current.name} 官网发送，再将完整回答粘贴到下方导入。` : task.manualWeb ? task.requiresPaste ? '请手动发送音乐匹配提示词，复制完整回答到「DeepSeek 分析结果」的音乐推荐结果框并导入。' : '请手动发送；剧情解析回答会自动读取，音乐匹配回答需手动复制到结果选项卡。' : '网页回答会自动读取并接回原任务，无需 API 配置。'}</small>
           </div>
-          <details>
-            <summary>网页无法自动读取时，粘贴回答继续</summary>
-            <textarea aria-label="网页分析结果" value={manualReply} onChange={(event: any) => setManualReply(event.target.value)} rows={3} placeholder="粘贴网页返回的完整 JSON 回答" />
-            <button type="button" disabled={!manualReply.trim()} onClick={() => taskAction('import')}>导入结果并继续</button>
-          </details>
+          {!task.manualWeb && (
+            <details open={task.manualOnly || undefined}>
+              <summary>{task.manualOnly ? `粘贴 ${current.name} 完整回答` : '网页无法自动读取时，粘贴回答继续'}</summary>
+              <textarea aria-label="网页分析结果" value={manualReply} onChange={(event: any) => setManualReply(event.target.value)} rows={3} placeholder="粘贴网页返回的完整 JSON 回答" />
+              <button type="button" disabled={!manualReply.trim()} onClick={() => taskAction('import')}>导入结果并继续</button>
+            </details>
+          )}
         </div>
       )}
       <div className="bos-web-ai-bar">

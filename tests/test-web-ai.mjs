@@ -61,13 +61,16 @@ test('cancelled or switched pages cannot receive a delayed Enter fallback', asyn
   await assert.rejects(second, /网页已切换/); assert.equal(events.length, 0); f.host.dispose();
 });
 test('only known providers and HTTPS pages are allowed; lookalike domains are not official', () => {
-  assert.equal(WEB_AI_PROVIDERS.length, 2);
+  assert.equal(WEB_AI_PROVIDERS.length, 4);
   assert.throws(() => webAIProvider('https://example.com'), /请选择/);
   for (const url of ['file:///C:/private', 'javascript:alert(1)', 'http://localhost', 'data:text/html,x', 'https://user:password@example.com']) assert.equal(isSecureWebURL(url), false);
   assert.equal(isWebAIPage('deepseek', 'https://chat.deepseek.com/'), true);
   assert.equal(isWebAIPage('deepseek', 'https://deepseek.com.evil.test/'), false);
   assert.equal(isWebAIPage('doubao', 'https://www.doubao.com/chat/'), true);
   assert.equal(isWebAIPage('doubao', 'https://chat.deepseek.com/'), false);
+  assert.equal(isWebAIPage('qwen', 'https://www.qianwen.com/'), true);
+  assert.equal(isWebAIPage('kimi', 'https://www.kimi.com/'), true);
+  assert.equal(isWebAIPage('kimi', 'https://kimi.com.evil.test/'), false);
 });
 test('native view stays within viewport, scroll region and expanded rail at non-default zoom', () => {
   assert.deepEqual(fitWebAIBounds({ x: -20, y: 80, width: 500, height: 900 }, [600, 500], 1.25), { x: 0, y: 100, width: 600, height: 400 });

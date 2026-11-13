@@ -30,7 +30,7 @@
   overflow-x: hidden !important;
   overscroll-behavior: contain !important;
   scrollbar-width: thin;
-  scrollbar-color: #39403e transparent;
+  scrollbar-color: var(--ui-border, #39403e) transparent;
 }
 .model-menu-list::-webkit-scrollbar {
   width: 6px;
@@ -39,11 +39,35 @@
   background: transparent;
 }
 .model-menu-list::-webkit-scrollbar-thumb {
-  background: #39403e;
+  background: var(--ui-border, #39403e);
   border-radius: 3px;
 }
 .model-menu-list::-webkit-scrollbar-thumb:hover {
-  background: #525d5a;
+  background: var(--ui-muted, #525d5a);
+}
+.model-fetch-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 9px;
+  margin-bottom: 6px;
+  border-radius: 7px;
+  border: 1px dashed var(--ui-border, #525d5a);
+  background: var(--ui-soft, #282e2c);
+  color: var(--ui-accent, #c5f54f);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.model-fetch-action:hover:not(:disabled) {
+  border-color: var(--ui-accent, #c5f54f);
+  background: var(--ui-raised, #191e1d);
+}
+.model-fetch-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .model-menu-list button,
 .model-menu-item {
@@ -56,7 +80,7 @@
   padding: 0 8px;
   border: 0;
   border-radius: 5px;
-  color: #e0e5e2;
+  color: var(--ui-text, #e0e5e2);
   background: transparent;
   font-size: 11px;
   cursor: pointer;
@@ -64,7 +88,7 @@
 }
 .model-menu-list button:hover,
 .model-menu-item:hover {
-  background: #282e2c !important;
-  color: var(--lime, #c5f54f) !important;
+  background: var(--ui-soft, #282e2c);
+  color: var(--ui-accent, #c5f54f);
 }
 

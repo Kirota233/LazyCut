@@ -252,7 +252,7 @@ export function WatermarkStudio({ active }: WatermarkStudioProps) {
               <div className="bos-wm-stage-Safebox">
                 <span className="bos-wm-stage-tag">{isBuiltinPng ? '红薯样片原版图层 (watermark.png)' : '样片画幅预览'}</span>
                 <span className="bos-wm-stage-res">
-                  {settings.size === 'original' ? '原画分辨率直出' : settings.size.toUpperCase()}
+                  {(!settings.size || settings.size === 'original') ? '原画分辨率直出' : String(settings.size).toUpperCase()}
                 </span>
               </div>
 
