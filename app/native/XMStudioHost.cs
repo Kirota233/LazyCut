@@ -73,6 +73,16 @@ namespace XMStudioHost
         public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         public const int SW_SHOWNOACTIVATE = 4;
+        public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+
+        [DllImport("user32.dll")]
+        public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+        public static void ExcludeFromCapture(IntPtr handle)
+        {
+            if (handle == IntPtr.Zero) return;
+            try { SetWindowDisplayAffinity(handle, WDA_EXCLUDEFROMCAPTURE); } catch { }
+        }
 
         public static void ReleaseWebViewCapture()
         {
@@ -534,6 +544,7 @@ namespace XMStudioHost
         {
             base.OnHandleCreated(e);
             Win32.DisableBorderAndShadow(Handle);
+            Win32.ExcludeFromCapture(Handle);
             RenderLayered();
         }
 
@@ -1604,6 +1615,12 @@ namespace XMStudioHost
             this.MinimumSize = new Size(320, 300);
         }
 
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Win32.ExcludeFromCapture(Handle);
+        }
+
         protected override void WndProc(ref Message m)
         {
             if (m.Msg == WM_NCHITTEST)
@@ -1763,6 +1780,12 @@ namespace XMStudioHost
         public Action OnStopRecording;
 
         protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Win32.ExcludeFromCapture(Handle);
+        }
 
         public RecordingGuidePopupForm(Icon appIcon)
         {
@@ -1973,7 +1996,7 @@ namespace XMStudioHost
 
     internal sealed class StudioAppContext : ApplicationContext
     {
-        public const string CurrentVersion = "1.8.1";
+        public const string CurrentVersion = "1.8.2";
         public const int AppPort = 37651;
         private readonly string _baseDir;
         private readonly string _userDataDir;
@@ -2125,6 +2148,7 @@ namespace XMStudioHost
                     }
                     else if (evName == "scan-capture" && ev.ContainsKey("id"))
                     {
+                        RunOnUi(() => EnsureFloatingWindowsExcludedFromCapture(), true);
                         object capId = ev["id"];
                         var unused = _jianyingRpc.CallAsync(new Dictionary<string, object>
                         {
@@ -2196,6 +2220,7 @@ namespace XMStudioHost
                     }
                     else if (evName == "recording-capture" && ev.ContainsKey("id") && ev.ContainsKey("token"))
                     {
+                        RunOnUi(() => EnsureFloatingWindowsExcludedFromCapture(), true);
                         var unused = _jianyingRpc.CallAsync(new Dictionary<string, object>
                         {
                             { "action", "recording_capture_ready" },
@@ -3332,6 +3357,7 @@ namespace XMStudioHost
                     Icon = LoadAppIcon(),
                 };
                 Win32.EnableRoundedAndDark(_panelForm.Handle, true);
+                Win32.ExcludeFromCapture(_panelForm.Handle);
                 _panelWebView = new WebView2 { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.Transparent };
                 _panelForm.Controls.Add(_panelWebView);
 
@@ -3887,6 +3913,20 @@ namespace XMStudioHost
                 if (!_mainForm.InvokeRequired) { action(); return; }
                 if (wait) _mainForm.Invoke(action);
                 else _mainForm.BeginInvoke(action);
+            }
+            catch { }
+        }
+
+        private void EnsureFloatingWindowsExcludedFromCapture()
+        {
+            try
+            {
+                if (_orbForm != null && !_orbForm.IsDisposed && _orbForm.IsHandleCreated)
+                    Win32.ExcludeFromCapture(_orbForm.Handle);
+                if (_panelForm != null && !_panelForm.IsDisposed && _panelForm.IsHandleCreated)
+                    Win32.ExcludeFromCapture(_panelForm.Handle);
+                if (_recordingPopupForm != null && !_recordingPopupForm.IsDisposed && _recordingPopupForm.IsHandleCreated)
+                    Win32.ExcludeFromCapture(_recordingPopupForm.Handle);
             }
             catch { }
         }

@@ -1,4 +1,4 @@
-LazyCut 1.8.1 使用说明
+LazyCut 1.8.2 使用说明
 
 适用系统：Windows 10 / Windows 11 64 位（x64）。
 

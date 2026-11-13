@@ -1,6 +1,6 @@
 {
   "name": "lazycut-source",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "private": true,
   "type": "module",
   "description": "LazyCut 功能源码与开发工具",

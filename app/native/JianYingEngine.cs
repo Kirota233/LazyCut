@@ -90,6 +90,14 @@ internal static class NativeWin32
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowCallback callback, IntPtr unused);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
 
+    public static long WindowArea(IntPtr window)
+    {
+        RECT rect;
+        if (window == IntPtr.Zero || !IsWindowVisible(window) || IsIconic(window) || !GetWindowRect(window, out rect)) return 0;
+        long w = rect.Right - rect.Left, h = rect.Bottom - rect.Top;
+        return (w > 0 && h > 0) ? w * h : 0;
+    }
+
     // Qt/CEF processes do not always expose Process.MainWindowHandle.
     // Discover visible top-level windows without changing foreground focus.
     public static IntPtr FindJianyingWindow()
@@ -106,7 +114,7 @@ internal static class NativeWin32
             if (width < 300 || height < 200) return true;
             long score = (long)width * height;
             if (!IsIconic(window)) score += 1000000000L;
-            if (window == foreground) score += 2000000000L;
+            if (window == foreground && width >= 600 && height >= 400) score += 100000L;
             if (score > bestScore) { best = window; bestScore = score; }
             return true;
         }, IntPtr.Zero);
@@ -1195,7 +1203,8 @@ internal sealed partial class JianYingEngine
                 Log(string.Format("[{0}/{1}] {2}", i + 1, total, d.Item3));
 
                 ExportPhase("第 1 步：打开草稿 · " + d.Item3);
-                SafeClick(d.Item1, d.Item2, gen);
+                Point draftPoint = ResolveDraftClickPoint(d);
+                SafeClick(draftPoint.X, draftPoint.Y, gen);
                 InterruptibleWait(waits["open_draft"], gen);
 
                 ExportPhase("第 2 步：打开导出窗口");
@@ -1293,6 +1302,34 @@ internal sealed partial class JianYingEngine
             InterruptibleWait(0.8, gen);
         }
         throw new TimeoutException("等待导出完成超时（30 分钟）");
+    }
+
+    private Point ResolveDraftClickPoint(Tuple<int, int, string> draft)
+    {
+        Point point = new Point(draft.Item1, draft.Item2);
+        try
+        {
+            if (_draftScope != null && _draftScope.WindowBounds != null && _draftScope.WindowBounds.Length == 5)
+            {
+                IntPtr window = (_draftScope.Window != IntPtr.Zero && NativeWin32.IsWindowVisible(_draftScope.Window) && !NativeWin32.IsIconic(_draftScope.Window))
+                    ? _draftScope.Window
+                    : NativeWin32.FindJianyingWindow();
+                if (window != IntPtr.Zero)
+                {
+                    int[] currentFrame = WindowFrame(window);
+                    if (Math.Abs(_draftScope.WindowBounds[2] - currentFrame[2]) <= 4 &&
+                        Math.Abs(_draftScope.WindowBounds[3] - currentFrame[3]) <= 4 &&
+                        _draftScope.WindowBounds[4] == currentFrame[4])
+                    {
+                        point = new Point(
+                            point.X + currentFrame[0] - _draftScope.WindowBounds[0],
+                            point.Y + currentFrame[1] - _draftScope.WindowBounds[1]);
+                    }
+                }
+            }
+        }
+        catch { }
+        return point;
     }
 
     private void SafeClick(int x, int y, int gen, Action validateTarget = null)
