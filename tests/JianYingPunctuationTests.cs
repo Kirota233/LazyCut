@@ -80,6 +80,13 @@ internal static class JianYingPunctuationTests
         var own = Path.Combine(root, "single"); Directory.CreateDirectory(own); File.WriteAllText(Path.Combine(own, "draft_content.json"), "{}");
         Check(((IEnumerable<string>)Call("PunctuationDraftDirectories", own)).Single() == own, "Single draft selected directly");
         Check(((IEnumerable<string>)Call("PunctuationDraftDirectories", root)).Single() == own, "Root finds immediate drafts only");
+        Check(!NativeWin32.IsLiveProcess(null), "Null process is not live");
+        using (var self = System.Diagnostics.Process.GetCurrentProcess()) Check(NativeWin32.IsLiveProcess(self), "Current process is live");
+        using (var exited = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c exit 0") { CreateNoWindow = true, UseShellExecute = false }))
+        {
+            exited.WaitForExit(5000);
+            Check(!NativeWin32.IsLiveProcess(exited), "Exited process is not live");
+        }
 
         string splitRoot = Path.Combine(root, "split-drafts");
         string upperDir = Path.Combine(splitRoot, "血色女王11-1");

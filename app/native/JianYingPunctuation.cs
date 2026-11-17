@@ -110,10 +110,8 @@ internal sealed partial class JianYingEngine
 
     private void RequirePunctuationIdle()
     {
-        var processes = Process.GetProcessesByName("JianyingPro");
-        try {
-            if (processes.Length > 0) throw new InvalidOperationException("请保存草稿并完全退出剪映，再修改字幕；完成后重新打开草稿检查排版。");
-        } finally { foreach (var process in processes) process.Dispose(); }
+        if (IsJianyingRunning())
+            throw new InvalidOperationException("请保存草稿并完全退出剪映，再修改字幕；完成后重新打开草稿检查排版。");
     }
 
     private void RunPunctuationPreview(int gen)

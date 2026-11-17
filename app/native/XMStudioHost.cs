@@ -1512,6 +1512,7 @@ namespace XMStudioHost
                 {
                     using (p)
                     {
+                        try { if (p.Threads.Count == 0) continue; } catch { continue; }
                         processes++;
                         bool hasEd, accDen;
                         bool onlyCheck = !forceApplyOrRestore && !_enabled;
@@ -4577,6 +4578,7 @@ namespace XMStudioHost
                 {
                     try
                     {
+                        if (p.Threads.Count == 0) continue;
                         if (!p.HasExited && File.Exists(p.MainModule.FileName))
                         {
                             return p.MainModule.FileName;
@@ -4666,9 +4668,9 @@ namespace XMStudioHost
                 addRoot(executable);
                 foreach (var process in Process.GetProcessesByName("JianyingPro")) using (process)
                 {
-                    try { if (!process.HasExited) addRoot(process.MainModule.FileName); }
+                    try { if (process.Threads.Count == 0) continue; if (!process.HasExited) addRoot(process.MainModule.FileName); }
                     catch (InvalidOperationException) { }
-                    catch (System.ComponentModel.Win32Exception) { throw new Exception("无法确认剪映进程路径，请手动退出剪映后重试。"); }
+                    catch (System.ComponentModel.Win32Exception) { }
                 }
                 foreach (string name in new[] { "JianyingProTray", "JianyingPro", "VEDetector" })
                 {
@@ -4676,7 +4678,7 @@ namespace XMStudioHost
                     {
                         try
                         {
-                            if (process.HasExited || !ShouldStopJianyingProcess(name, process.MainModule.FileName, roots)) continue;
+                            if (process.Threads.Count == 0 || process.HasExited || !ShouldStopJianyingProcess(name, process.MainModule.FileName, roots)) continue;
                             process.Kill();
                             if (!process.WaitForExit(5000)) throw new Exception("剪映进程未能退出，请手动关闭后重试。");
                         }
@@ -4688,7 +4690,7 @@ namespace XMStudioHost
                 {
                     foreach (var process in Process.GetProcessesByName(name)) using (process)
                     {
-                        try { if (!process.HasExited && ShouldStopJianyingProcess(name, process.MainModule.FileName, roots)) throw new Exception("剪映仍有后台进程运行，请手动关闭后重试。"); }
+                        try { if (process.Threads.Count > 0 && !process.HasExited && ShouldStopJianyingProcess(name, process.MainModule.FileName, roots)) throw new Exception("剪映仍有后台进程运行，请手动关闭后重试。"); }
                         catch (InvalidOperationException) { }
                         catch (System.ComponentModel.Win32Exception) { throw new Exception("无法确认剪映后台进程已退出，请手动检查后重试。"); }
                     }

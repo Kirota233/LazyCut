@@ -89,6 +89,39 @@ internal static class NativeWin32
     public delegate bool EnumWindowCallback(IntPtr window, IntPtr unused);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowCallback callback, IntPtr unused);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    public static bool IsLiveProcess(Process process)
+    {
+        if (process == null) return false;
+        try
+        {
+            if (process.Threads.Count == 0) return false;
+            return !process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static bool HasVisibleDesktopWindows()
+    {
+        bool any = false;
+        EnumWindows((window, unused) => {
+            if (IsWindowVisible(window)) { any = true; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return any;
+    }
 
     public static long WindowArea(IntPtr window)
     {
@@ -99,22 +132,22 @@ internal static class NativeWin32
     }
 
     // Qt/CEF processes do not always expose Process.MainWindowHandle.
-    // Discover visible top-level windows without changing foreground focus.
+    // Discover visible or taskbar-minimized top-level windows without changing foreground focus.
     public static IntPtr FindJianyingWindow()
     {
         var ids = new HashSet<uint>();
         foreach (var process in Process.GetProcessesByName("JianyingPro"))
-            using (process) { try { ids.Add((uint)process.Id); } catch (InvalidOperationException) { } }
+            using (process) { if (IsLiveProcess(process)) { try { ids.Add((uint)process.Id); } catch (InvalidOperationException) { } } }
         IntPtr best = IntPtr.Zero, foreground = GetForegroundWindow(); long bestScore = -1;
         if (ids.Count == 0) return best;
         EnumWindows((window, unused) => {
             uint pid; GetWindowThreadProcessId(window, out pid); RECT rect;
             if (!ids.Contains(pid) || !IsWindowVisible(window) || !GetWindowRect(window, out rect)) return true;
             int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
-            if (width < 300 || height < 200) return true;
-            long score = (long)width * height;
-            if (!IsIconic(window)) score += 1000000000L;
-            if (window == foreground && width >= 600 && height >= 400) score += 100000L;
+            bool iconic = IsIconic(window);
+            if (iconic ? GetWindowTextLength(window) <= 0 : (width < 300 || height < 200)) return true;
+            long score = iconic ? 1L : (long)width * height + 1000000000L;
+            if (!iconic && window == foreground && width >= 600 && height >= 400) score += 100000L;
             if (score > bestScore) { best = window; bestScore = score; }
             return true;
         }, IntPtr.Zero);
@@ -151,7 +184,7 @@ internal static class NativeWin32
     {
         var ids = new HashSet<uint>();
         foreach (var process in Process.GetProcessesByName("JianyingPro"))
-            using (process) { try { ids.Add((uint)process.Id); } catch { } }
+            using (process) { if (IsLiveProcess(process)) { try { ids.Add((uint)process.Id); } catch { } } }
         if (ids.Count == 0) return IntPtr.Zero;
         IntPtr found = IntPtr.Zero;
         EnumWindows((window, unused) => {
@@ -995,11 +1028,53 @@ internal sealed partial class JianYingEngine
         }
     }
 
+    private static bool HasLiveProcess(string name)
+    {
+        bool found = false;
+        try
+        {
+            foreach (var p in Process.GetProcessesByName(name))
+            {
+                using (p)
+                {
+                    if (!found && NativeWin32.IsLiveProcess(p)) found = true;
+                }
+            }
+        }
+        catch { }
+        return found;
+    }
+
     private static bool IsJianyingRunning()
     {
         try
         {
-            return Process.GetProcessesByName("JianyingPro").Length > 0;
+            if (!HasLiveProcess("JianyingPro")) return false;
+            if (NativeWin32.FindJianyingWindow() != IntPtr.Zero) return true;
+            if (!NativeWin32.HasVisibleDesktopWindows()) return true;
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                Thread.Sleep(200);
+                if (NativeWin32.FindJianyingWindow() != IntPtr.Zero) return true;
+                if (!HasLiveProcess("JianyingPro")) return false;
+            }
+            foreach (string procName in new[] { "JianyingProTray", "JianyingPro", "VEDetector" })
+            {
+                foreach (var p in Process.GetProcessesByName(procName))
+                {
+                    using (p)
+                    {
+                        if (!NativeWin32.IsLiveProcess(p)) continue;
+                        try
+                        {
+                            p.Kill();
+                            p.WaitForExit(2000);
+                        }
+                        catch { }
+                    }
+                }
+            }
+            return NativeWin32.FindJianyingWindow() != IntPtr.Zero;
         }
         catch
         {

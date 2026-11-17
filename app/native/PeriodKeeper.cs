@@ -161,6 +161,7 @@ internal static class PeriodKeeper {
         var versions = new List<string>();
         foreach (Process process in Process.GetProcessesByName("JianyingPro")) {
             using (process) {
+                try { if (process.Threads.Count == 0) continue; } catch { continue; }
                 processes++;
                 try {
                     long started = 0;
