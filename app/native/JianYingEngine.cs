@@ -1113,9 +1113,9 @@ internal sealed partial class JianYingEngine
             Bitmap target = screen;
             try
             {
-                if (screen.Width > 1920 || screen.Height > 1920)
+                if (screen.Width > 2560 || screen.Height > 2560)
                 {
-                    double ratio = Math.Min(1920.0 / screen.Width, 1920.0 / screen.Height);
+                    double ratio = Math.Min(2560.0 / screen.Width, 2560.0 / screen.Height);
                     int w = Math.Max(1, (int)Math.Round(screen.Width * ratio));
                     int h = Math.Max(1, (int)Math.Round(screen.Height * ratio));
                     target = new Bitmap(screen, new Size(w, h));
@@ -1127,7 +1127,7 @@ internal sealed partial class JianYingEngine
                     {
                         using (EncoderParameters ep = new EncoderParameters(1))
                         {
-                            ep.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 82L);
+                            ep.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 88L);
                             target.Save(ms, jpegCodec, ep);
                         }
                     }

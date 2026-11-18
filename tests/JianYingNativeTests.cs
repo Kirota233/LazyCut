@@ -159,6 +159,9 @@ internal static class JianYingNativeTests
                 Check(cancelled,"F10 interrupts return-home verification before clicking"); Set("_stopFlag",false);
             } finally {Set("_homeWindow",oldWindow);Set("_homeFrame",oldFrame);Set("_captureHome",oldCapture);Set("_stopFlag",false);}
         }
+        string fastJson = "{\"drafts\":[{\"kind\":\"draft\",\"name\":\"最左草稿\",\"bounds\":{\"left\":160,\"top\":260,\"right\":280,\"bottom\":440}},{\"kind\":\"folder\",\"name\":\"文件夹\",\"bounds\":{\"left\":320,\"top\":260,\"right\":440,\"bottom\":440}},{\"kind\":\"draft\",\"name\":\"最右草稿\",\"bounds\":{\"left\":840,\"top\":260,\"right\":960,\"bottom\":440}}]}";
+        var fastParsed = (List<Tuple<int, int, string>>)Call("ParseCardsFast", fastJson, w, h, new Size(w, h));
+        Check(fastParsed.Count == 2 && fastParsed[0].Item3 == "最左草稿" && fastParsed[1].Item3 == "最右草稿" && fastParsed[1].Item1 == 1728 && fastParsed[1].Item2 == 378, "single-pass ParseCardsFast retains rightmost draft coordinates and skips folders");
     }
     [STAThread]
     public static int Main(string[] args) {
