@@ -1462,11 +1462,15 @@ internal sealed partial class JianYingEngine
             string dst = Convert.ToString(item["target"]);
             FileInfo sInfo = new FileInfo(src);
             FileInfo dInfo = new FileInfo(dst);
-            if (!sInfo.Exists || (sInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+            if (!sInfo.Exists)
             {
                 throw new InvalidOperationException("文件路径已变化或超出所选目录，请重新预览。");
             }
-            if (!ValidFilename(dInfo.Name) || !string.Equals(sInfo.DirectoryName, dInfo.DirectoryName, StringComparison.OrdinalIgnoreCase))
+            if (!ValidFilename(dInfo.Name))
+            {
+                throw new InvalidOperationException("生成的文件名包含非法字符或过长，请修改命名模板：" + dInfo.Name);
+            }
+            if (!string.Equals(sInfo.DirectoryName, dInfo.DirectoryName, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("文件路径已变化或超出所选目录，请重新预览。");
             }
@@ -1504,7 +1508,8 @@ internal sealed partial class JianYingEngine
         {
             throw new InvalidOperationException("请选择存在的目标文件夹或拖入待改名文件。");
         }
-        Match m = Regex.Match(template ?? "", @"\d+");
+        template = (template ?? "").Trim();
+        Match m = Regex.Match(template, @"\d+");
         if (!m.Success)
         {
             throw new InvalidOperationException("模板必须包含一个数字，例如：短剧名称_第1集");

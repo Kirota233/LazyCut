@@ -1,3 +1,11 @@
+# LazyCut 1.8.5 更新日志
+
+## 1. 批量改名预览修复与悬浮窗防拖出屏幕限制
+- **修复拖入文件改名生成预览误报「文件路径已变化或超出所选目录」**：移除 `JianYingEngine.ValidateRenamePlan` 对 Windows 云盘/OneDrive 同步目录文件 `FileAttributes.ReparsePoint` 标记的误拦截，拆分合法文件名校验提示，并在 `RegexPreview` 对模板做空白修剪；同步在悬浮窗面板 `companion-dock.mjs` 拖入文件或点击「选文件」时清空旧目录缓存，避免混淆目录与单文件预览状态。
+- **新增悬浮窗与悬浮球防拖出屏幕限制**：为桌面悬浮球（`LayeredPetOrbForm`）与悬浮面板（`ResizablePanelForm`）增加屏幕工作区 `WorkingArea` 边界限位（含拖拽实时限位 `WM_MOVING` / `WM_EXITSIZEMOVE` / `OnMouseMove` 及 `ShowCompanionAsync` / `TickCompanion` 自动拉回），防止拖动过界或分辨率变化后找不到悬浮窗。
+
+---
+
 # LazyCut 1.8.4 更新日志
 
 ## 1. 恢复 2560px 全窗单次草稿扫描与提取字幕进程误判修复

@@ -642,6 +642,7 @@
       }
 
       const rFiles = Array.isArray(s.renameFiles) ? s.renameFiles : [];
+      if (rFiles.length > 0 && !s.renameFolder) renameFolder = '';
       const fCount = Number(jy.fileCount || rFiles.length || 0);
       $('renameFilesMeta').textContent = fCount > 0 ? ('✓ 已载入 ' + fCount + ' 个待改名文件') : (renameFolder ? ('目录：' + renameFolder) : '尚未拖入文件');
       const plan = Array.isArray(jy.plan) ? jy.plan : [];
@@ -855,7 +856,7 @@
       const res = await act('jy-pick-rename-dir', null, $('jyPickRenameDir'), '选择中…');
       if (res?.renameFolder) renameFolder = res.renameFolder;
     };
-    $('jyPickRenameFiles').onclick = () => act('jy-pick-rename-files', null, $('jyPickRenameFiles'), '选择中…');
+    $('jyPickRenameFiles').onclick = () => { renameFolder = ''; return act('jy-pick-rename-files', null, $('jyPickRenameFiles'), '选择中…'); };
     $('jyClearRenameFiles').onclick = () => { renameFolder = ''; act('jy-clear-rename-files', null, $('jyClearRenameFiles'), '清除中…'); };
     $('jyPreviewRename').onclick = () => act('jy-preview-rename', {
       folder: renameFolder,
@@ -876,7 +877,10 @@
         z.classList.remove('drag');
         const files = Array.from(e.dataTransfer?.files || []);
         const paths = files.map(f => f.path || f.name).filter(Boolean);
-        if (paths.length) await act('drop-paths', paths);
+        if (paths.length) {
+          renameFolder = '';
+          await act('drop-paths', paths);
+        }
       };
     });
 

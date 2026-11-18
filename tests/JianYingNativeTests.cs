@@ -57,9 +57,10 @@ internal static class JianYingNativeTests
         engine.Dispatch("files", Args("files", new[] {a,subtitle}));
         Reject(() => Call("FillAiRename", new object[] { new ArrayList {Args("old","alpha","new","title")} }), "ambiguous video/subtitle stems rejected");
         engine.Dispatch("files", Args("files", new[] {a,b}));
-        Call("RegexPreview", "", "标题第7集");
+        Call("RegexPreview", "", "  标题第7集  ");
         plan = (List<Dictionary<string,object>>)Field("_plan");
-        Check(plan.Count == 2 && (string)plan[0]["new_name"] == "标题第7集.mp4" && (string)plan[1]["new_name"] == "标题第8集.mp4", "individually selected unnumbered files use template start number");
+        Check(plan.Count == 2 && (string)plan[0]["new_name"] == "标题第7集.mp4" && (string)plan[1]["new_name"] == "标题第8集.mp4", "individually selected unnumbered files use trimmed template start number");
+        Call("ValidateRenamePlan", true); checks++;
         engine.Dispatch("files", Args("files", new string[0]));
         Check(((List<Dictionary<string,object>>)Field("_plan")).Count == 0, "clear selection clears preview without deleting files");
     }

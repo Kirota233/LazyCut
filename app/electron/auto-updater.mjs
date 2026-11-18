@@ -22,7 +22,7 @@ export function compareSemver(a, b) {
 }
 
 export function createAutoUpdater({
-  currentVersion = '1.8.4',
+  currentVersion = '1.8.5',
   repo = 'Kirota233/LazyCut',
   downloadDirectory,
   fetcher = globalThis.fetch,

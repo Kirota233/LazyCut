@@ -43,6 +43,9 @@ namespace XMStudioHost
         [StructLayout(LayoutKind.Sequential)]
         public struct SIZE { public int CX; public int CY; public SIZE(int cx, int cy) { CX = cx; CY = cy; } }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         public struct BLENDFUNCTION
         {
@@ -83,6 +86,50 @@ namespace XMStudioHost
         {
             if (handle == IntPtr.Zero) return;
             try { SetWindowDisplayAffinity(handle, WDA_EXCLUDEFROMCAPTURE); } catch { }
+        }
+
+        public static Rectangle ClampBoundsToScreen(Rectangle bounds, Point? anchorPoint = null)
+        {
+            Rectangle area = Screen.PrimaryScreen != null
+                ? Screen.PrimaryScreen.WorkingArea
+                : SystemInformation.VirtualScreen;
+            if (anchorPoint.HasValue)
+            {
+                area = Screen.FromPoint(anchorPoint.Value).WorkingArea;
+            }
+            else
+            {
+                bool visibleOnAny = false;
+                foreach (Screen scr in Screen.AllScreens)
+                {
+                    Rectangle inter = Rectangle.Intersect(bounds, scr.WorkingArea);
+                    if (inter.Width >= Math.Min(60, bounds.Width) && inter.Height >= Math.Min(60, bounds.Height))
+                    {
+                        area = scr.WorkingArea;
+                        visibleOnAny = true;
+                        break;
+                    }
+                }
+                if (!visibleOnAny)
+                {
+                    area = Screen.FromRectangle(bounds).WorkingArea;
+                }
+            }
+            int maxX = Math.Max(area.Left, area.Right - bounds.Width);
+            int maxY = Math.Max(area.Top, area.Bottom - bounds.Height);
+            int x = Math.Max(area.Left, Math.Min(maxX, bounds.Left));
+            int y = Math.Max(area.Top, Math.Min(maxY, bounds.Top));
+            return new Rectangle(x, y, bounds.Width, bounds.Height);
+        }
+
+        public static void ClampFormToScreen(Form form, Point? anchorPoint = null)
+        {
+            if (form == null || form.IsDisposed) return;
+            Rectangle next = ClampBoundsToScreen(form.Bounds, anchorPoint);
+            if (form.Left != next.Left || form.Top != next.Top)
+            {
+                form.Location = next.Location;
+            }
         }
 
         public static void ReleaseWebViewCapture()
@@ -1030,8 +1077,13 @@ namespace XMStudioHost
                 _lastScreen = cur;
                 if (dx != 0 || dy != 0)
                 {
-                    Location = new Point(Left + dx, Top + dy);
-                    var area = Screen.FromControl(this).WorkingArea;
+                    var area = Screen.FromPoint(cur).WorkingArea;
+                    int nextX = Math.Max(area.Left, Math.Min(Math.Max(area.Left, area.Right - Width), Left + dx));
+                    int nextY = Math.Max(area.Top, Math.Min(Math.Max(area.Top, area.Bottom - Height), Top + dy));
+                    if (nextX != Left || nextY != Top)
+                    {
+                        Location = new Point(nextX, nextY);
+                    }
                     if (Left <= area.Left + 4 || Top <= area.Top + 4 || Right >= area.Right - 4 || Bottom >= area.Bottom - 4)
                     {
                         SwitchGif("angry", "哎呀！撞疼我了！😣", 3000);
@@ -1638,6 +1690,8 @@ namespace XMStudioHost
     internal sealed class ResizablePanelForm : Form
     {
         private const int WM_NCHITTEST = 0x84;
+        private const int WM_MOVING = 0x0216;
+        private const int WM_EXITSIZEMOVE = 0x0232;
         private const int HTCLIENT = 1;
         private const int HTLEFT = 10;
         private const int HTRIGHT = 11;
@@ -1664,6 +1718,24 @@ namespace XMStudioHost
 
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == WM_MOVING && m.LParam != IntPtr.Zero)
+            {
+                Win32.RECT r = (Win32.RECT)Marshal.PtrToStructure(m.LParam, typeof(Win32.RECT));
+                Rectangle clamped = Win32.ClampBoundsToScreen(Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom), Control.MousePosition);
+                r.Left = clamped.Left;
+                r.Top = clamped.Top;
+                r.Right = clamped.Right;
+                r.Bottom = clamped.Bottom;
+                Marshal.StructureToPtr(r, m.LParam, false);
+                m.Result = (IntPtr)1;
+                return;
+            }
+            if (m.Msg == WM_EXITSIZEMOVE)
+            {
+                base.WndProc(ref m);
+                Win32.ClampFormToScreen(this, Control.MousePosition);
+                return;
+            }
             if (m.Msg == WM_NCHITTEST)
             {
                 base.WndProc(ref m);
@@ -2037,7 +2109,7 @@ namespace XMStudioHost
 
     internal sealed partial class StudioAppContext : ApplicationContext
     {
-        public const string CurrentVersion = "1.8.4";
+        public const string CurrentVersion = "1.8.5";
         public const int AppPort = 37651;
         private readonly string _baseDir;
         private readonly string _userDataDir;
@@ -3600,6 +3672,7 @@ namespace XMStudioHost
         private void PlaceCompanionPanel()
         {
             if (_orbForm == null || _panelForm == null || _orbForm.IsDisposed || _panelForm.IsDisposed) return;
+            Win32.ClampFormToScreen(_orbForm);
             var area = Screen.FromControl(_orbForm).WorkingArea;
             int x = _orbForm.Left - _panelForm.Width - 8;
             if (x < area.Left) x = _orbForm.Right + 8;
@@ -3607,6 +3680,7 @@ namespace XMStudioHost
             y = Math.Max(area.Top + 8, Math.Min(y, area.Bottom - _panelForm.Height - 8));
             x = Math.Max(area.Left + 8, Math.Min(x, area.Right - _panelForm.Width - 8));
             _panelForm.Location = new Point(x, y);
+            Win32.ClampFormToScreen(_panelForm);
         }
 
         private async Task<Dictionary<string, object>> ShowCompanionAsync(bool openPanel)
@@ -3615,6 +3689,7 @@ namespace XMStudioHost
             _companionVisible = true;
             _mainForm.BeginInvoke(new Action(() =>
             {
+                Win32.ClampFormToScreen(_orbForm);
                 if (!_orbForm.Visible) _orbForm.Show();
                 _orbForm.BringToFront();
                 if (openPanel)
@@ -3668,6 +3743,7 @@ namespace XMStudioHost
                     {
                         Win32.ReleaseCapture();
                         Win32.SendMessage(_panelForm.Handle, Win32.WM_NCLBUTTONDOWN, (IntPtr)Win32.HTCAPTION, IntPtr.Zero);
+                        Win32.ClampFormToScreen(_panelForm, Control.MousePosition);
                     }
                 }));
                 return BroadcastCompanionState();
@@ -3793,7 +3869,8 @@ namespace XMStudioHost
                 {
                     if (_orbForm != null && !_orbForm.IsDisposed)
                     {
-                        _orbForm.Location = new Point(_orbForm.Left + dx, _orbForm.Top + dy);
+                        Rectangle clamped = Win32.ClampBoundsToScreen(new Rectangle(_orbForm.Left + dx, _orbForm.Top + dy, _orbForm.Width, _orbForm.Height));
+                        _orbForm.Location = clamped.Location;
                         if (_panelOpen) PlaceCompanionPanel();
                     }
                 }));
@@ -4108,6 +4185,14 @@ namespace XMStudioHost
                     }
                 }
             }
+            RunOnUi(() =>
+            {
+                Win32.ClampFormToScreen(_orbForm);
+                if (_panelOpen && _panelForm != null && !_panelForm.IsDisposed && _panelForm.Visible)
+                {
+                    Win32.ClampFormToScreen(_panelForm);
+                }
+            }, false);
 
             BroadcastCompanionState();
         }
