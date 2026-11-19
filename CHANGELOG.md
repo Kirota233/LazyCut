@@ -1,3 +1,12 @@
+# LazyCut 1.8.6 更新日志
+
+## 1. 修复悬浮窗启动唤醒、托盘隐藏逻辑与托盘菜单美化
+- **修复启动及二次启动唤醒时悬浮窗不显示问题**：在 `Program.Main()` 入口启用 `Win32.SetProcessDPIAware()` 统一桌面坐标系；新增单实例 `/__activate` 本地唤醒路由与 `ActivateMainAndCompanion()`，重复打开程序可自动恢复主界面并召唤隐藏中的悬浮窗；调整 `LayeredPetOrbForm` 先完成 `RenderLayered()` 分层位图渲染再应用截图穿透，优化 `EnsureCompanionPanelAsync()` 先布局显示父窗口再初始化面板 `WebView2`。
+- **修复托盘在有小猫时点击「隐藏/召唤」反向展开面板问题**：修正 `HandleCompanionActionAsync("toggle")` 判断，只要桌面存在悬浮窗/小猫即优先完整隐藏，处于隐藏状态时再召唤出现。
+- **精简与美化系统托盘右键菜单**：新增深色圆角自绘渲染器 `ModernTrayMenuRenderer` 与 `ModernTrayColorTable`，隐藏左侧空白边距并保留 DWM 圆角暗色样式，精简菜单项描述并根据状态动态切换「隐藏悬浮窗 / 召唤悬浮窗」。
+
+---
+
 # LazyCut 1.8.5 更新日志
 
 ## 1. 批量改名预览修复与悬浮窗防拖出屏幕限制

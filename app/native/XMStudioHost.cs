@@ -56,6 +56,9 @@ namespace XMStudioHost
         }
 
         [DllImport("user32.dll")]
+        public static extern bool SetProcessDPIAware();
+
+        [DllImport("user32.dll")]
         public static extern bool ReleaseCapture();
 
         [DllImport("user32.dll")]
@@ -344,6 +347,7 @@ namespace XMStudioHost
     {
         private readonly string _clientRoot;
         private readonly Func<string, string> _resolveTrackPath;
+        private readonly Action _onActivate;
         private TcpListener _listener;
         private volatile bool _running;
 
@@ -367,10 +371,11 @@ namespace XMStudioHost
             { ".ogg", "audio/ogg" },
         };
 
-        public LocalServer(string clientRoot, int port, Func<string, string> resolveTrackPath)
+        public LocalServer(string clientRoot, int port, Func<string, string> resolveTrackPath, Action onActivate = null)
         {
             _clientRoot = Path.GetFullPath(clientRoot);
             _resolveTrackPath = resolveTrackPath;
+            _onActivate = onActivate;
             _listener = new TcpListener(IPAddress.Loopback, port);
             _listener.Start();
             _running = true;
@@ -416,6 +421,12 @@ namespace XMStudioHost
                     }
 
                     string urlPath = Uri.UnescapeDataString(rawUrl.Split('?')[0]);
+                    if (string.Equals(urlPath, "/__activate", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { if (_onActivate != null) _onActivate(); } catch { }
+                        WriteStatus(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                        return;
+                    }
                     if (urlPath.StartsWith("/local-music/", StringComparison.OrdinalIgnoreCase))
                     {
                         string id = urlPath.Substring("/local-music/".Length);
@@ -622,8 +633,17 @@ namespace XMStudioHost
             _deferredGifTimer.Start();
             FormClosed += (_, __) => { try { if (_deferredGifTimer != null) _deferredGifTimer.Dispose(); } catch { } };
             Win32.DisableBorderAndShadow(Handle);
-            Win32.ExcludeFromCapture(Handle);
             RenderLayered();
+            Win32.ExcludeFromCapture(Handle);
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (Visible && !IsDisposed && IsHandleCreated)
+            {
+                RenderLayered();
+            }
         }
 
         private void OnGifFrameChanged(object sender, EventArgs e) { }
@@ -2109,7 +2129,7 @@ namespace XMStudioHost
 
     internal sealed partial class StudioAppContext : ApplicationContext
     {
-        public const string CurrentVersion = "1.8.5";
+        public const string CurrentVersion = "1.8.6";
         public const int AppPort = 37651;
         private readonly string _baseDir;
         private readonly string _userDataDir;
@@ -2239,7 +2259,7 @@ namespace XMStudioHost
             {
                 string p;
                 return _musicIdToPath.TryGetValue(id, out p) ? p : null;
-            });
+            }, () => ActivateMainAndCompanion());
 
             string jyExe = ResolveExistingFile(
                 Path.Combine(_baseDir, "resources", "jianying", "JianYingEngine.exe"),
@@ -2457,6 +2477,12 @@ namespace XMStudioHost
                 Task mainWvTask = InitWebViewAsync(_mainWebView, "main", string.Format("http://127.0.0.1:{0}/", AppPort), true);
                 await ShowCompanionAsync(false);
                 await mainWvTask;
+                if (_companionVisible && _orbForm != null && !_orbForm.IsDisposed)
+                {
+                    Win32.ClampFormToScreen(_orbForm);
+                    if (!_orbForm.Visible) _orbForm.Show();
+                    _orbForm.BringToFront();
+                }
                 var unusedInit = Task.Run(async () =>
                 {
                     if (_jianyingRpc != null)
@@ -2471,22 +2497,42 @@ namespace XMStudioHost
                     }
                     await CheckUpdaterAsync();
                 });
-                var unusedPrewarm = PrewarmCompanionPanelAfterDelayAsync();
             };
 
             WarmWebViewEnv("main");
             _mainForm.Show();
         }
 
-        private async Task PrewarmCompanionPanelAfterDelayAsync()
+        private void ActivateMainAndCompanion(string navigateTab = null)
         {
-            try
+            RunOnUi(new Action(async () =>
             {
-                await Task.Delay(1200);
-                if (_mainForm == null || _mainForm.IsDisposed || !_mainForm.IsHandleCreated) return;
-                _mainForm.BeginInvoke(new Action(() => { var _ = EnsureCompanionPanelAsync(); }));
-            }
-            catch { }
+                try
+                {
+                    if (_mainForm != null && !_mainForm.IsDisposed)
+                    {
+                        if (_mainForm.WindowState == FormWindowState.Minimized)
+                            _mainForm.WindowState = FormWindowState.Normal;
+                        if (!_mainForm.Visible) _mainForm.Show();
+                        _mainForm.Activate();
+                        _mainForm.BringToFront();
+                    }
+                    if (!string.IsNullOrEmpty(navigateTab))
+                    {
+                        SendEventToMain("bos:tray-navigate", navigateTab);
+                    }
+                    if (!_companionVisible || _orbForm == null || _orbForm.IsDisposed || !_orbForm.Visible)
+                    {
+                        await ShowCompanionAsync(false);
+                    }
+                    else
+                    {
+                        Win32.ClampFormToScreen(_orbForm);
+                        _orbForm.BringToFront();
+                    }
+                }
+                catch { }
+            }), false);
         }
 
         private Task<CoreWebView2Environment> WarmWebViewEnv(string profileSubdir)
@@ -3656,7 +3702,15 @@ namespace XMStudioHost
                     }
                     if (_panelWebView.CoreWebView2 == null)
                     {
+                        PlaceCompanionPanel();
+                        if (!_panelForm.Visible) _panelForm.Show();
+                        _panelForm.BringToFront();
                         await InitWebViewAsync(_panelWebView, "main", string.Format("http://127.0.0.1:{0}/companion-panel.html?acrylic=1", AppPort), true);
+                        if (_panelWebView.CoreWebView2 != null)
+                        {
+                            _panelWebView.CoreWebView2.NavigationCompleted += (s, e) => BroadcastCompanionState();
+                            BroadcastCompanionState();
+                        }
                     }
                     tcs.TrySetResult(true);
                 }
@@ -3732,8 +3786,8 @@ namespace XMStudioHost
             if (action == "hide") return HideCompanion();
             if (action == "toggle")
             {
-                if (!_companionVisible || !_panelOpen) return await ShowCompanionAsync(true);
-                return HideCompanion();
+                if (_companionVisible) return HideCompanion();
+                return await ShowCompanionAsync(false);
             }
             if (action == "panel-drag")
             {
@@ -4602,16 +4656,133 @@ namespace XMStudioHost
         }
 
         // ======================== Helpers & Tray ========================
+        private sealed class ModernTrayColorTable : ProfessionalColorTable
+        {
+            public override Color ToolStripDropDownBackground { get { return Color.FromArgb(24, 28, 36); } }
+            public override Color MenuBorder { get { return Color.FromArgb(42, 49, 64); } }
+            public override Color MenuItemBorder { get { return Color.Transparent; } }
+            public override Color MenuItemSelected { get { return Color.FromArgb(45, 55, 72); } }
+            public override Color SeparatorDark { get { return Color.FromArgb(42, 49, 64); } }
+            public override Color SeparatorLight { get { return Color.FromArgb(42, 49, 64); } }
+        }
+
+        private sealed class ModernTrayMenuRenderer : ToolStripProfessionalRenderer
+        {
+            public ModernTrayMenuRenderer() : base(new ModernTrayColorTable())
+            {
+                RoundedEdges = true;
+            }
+
+            protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+            {
+                using (var brush = new SolidBrush(Color.FromArgb(24, 28, 36)))
+                {
+                    e.Graphics.FillRectangle(brush, e.AffectedBounds);
+                }
+            }
+
+            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+            {
+                var rect = new Rectangle(0, 0, e.AffectedBounds.Width - 1, e.AffectedBounds.Height - 1);
+                using (var pen = new Pen(Color.FromArgb(42, 49, 64), 1f))
+                {
+                    e.Graphics.DrawRectangle(pen, rect);
+                }
+            }
+
+            protected override void OnRenderImageMargin(ToolStripRenderEventArgs e)
+            {
+                // 隐藏左侧空白图标栏
+            }
+
+            protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+            {
+                if (!e.Item.Enabled) return;
+                if (e.Item.Selected)
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    var rect = new Rectangle(4, 1, Math.Max(1, e.Item.Width - 8), Math.Max(1, e.Item.Height - 2));
+                    int d = 12;
+                    using (var path = new GraphicsPath())
+                    using (var brush = new SolidBrush(Color.FromArgb(45, 55, 72)))
+                    {
+                        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+                        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+                        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+                        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+                        path.CloseFigure();
+                        e.Graphics.FillPath(brush, path);
+                    }
+                }
+            }
+
+            protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+            {
+                int y = e.Item.Height / 2;
+                using (var pen = new Pen(Color.FromArgb(42, 49, 64), 1f))
+                {
+                    e.Graphics.DrawLine(pen, 10, y, Math.Max(10, e.Item.Width - 10), y);
+                }
+            }
+
+            protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+            {
+                e.TextColor = e.Item.Selected
+                    ? Color.White
+                    : (e.Item.ForeColor != Color.Empty && e.Item.ForeColor != SystemColors.ControlText ? e.Item.ForeColor : Color.FromArgb(229, 233, 240));
+                base.OnRenderItemText(e);
+            }
+        }
+
         private void InitSystemTray()
         {
-            var menu = new ContextMenuStrip();
-            menu.Items.Add("打开 LazyCut", null, (s, e) => { _mainForm.Show(); _mainForm.Activate(); });
-            menu.Items.Add("召唤/隐藏 悬浮窗", null, async (s, e) => await HandleCompanionActionAsync("toggle", null));
+            var menu = new ContextMenuStrip
+            {
+                ShowImageMargin = false,
+                ShowCheckMargin = false,
+                BackColor = Color.FromArgb(24, 28, 36),
+                ForeColor = Color.FromArgb(229, 233, 240),
+                Font = new Font("Microsoft YaHei UI", 9.5f),
+                Padding = new Padding(4, 6, 4, 6),
+                Renderer = new ModernTrayMenuRenderer()
+            };
+            menu.HandleCreated += (s, e) => Win32.EnableRoundedAndDark(menu.Handle, true);
+
+            var openItem = new ToolStripMenuItem("打开主界面", null, (s, e) => ActivateMainAndCompanion())
+            {
+                Font = new Font(menu.Font, FontStyle.Bold),
+                Padding = new Padding(10, 5, 16, 5)
+            };
+            var companionItem = new ToolStripMenuItem("隐藏悬浮窗", null, async (s, e) => await HandleCompanionActionAsync("toggle", null))
+            {
+                Padding = new Padding(10, 5, 16, 5)
+            };
+            var jyItem = new ToolStripMenuItem("剪映自动化", null, (s, e) => ActivateMainAndCompanion("jianying"))
+            {
+                Padding = new Padding(10, 5, 16, 5)
+            };
+            var wsItem = new ToolStripMenuItem("文案与配乐", null, (s, e) => ActivateMainAndCompanion("workspace"))
+            {
+                Padding = new Padding(10, 5, 16, 5)
+            };
+            var quitItem = new ToolStripMenuItem("退出程序", null, (s, e) => { _quitting = true; _mainForm.Close(); })
+            {
+                ForeColor = Color.FromArgb(248, 113, 113),
+                Padding = new Padding(10, 5, 16, 5)
+            };
+
+            menu.Items.Add(openItem);
+            menu.Items.Add(companionItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("剪映自动化与样片水印", null, (s, e) => { _mainForm.Show(); _mainForm.Activate(); SendEventToMain("bos:tray-navigate", "jianying"); });
-            menu.Items.Add("文案拆解与智能配乐", null, (s, e) => { _mainForm.Show(); _mainForm.Activate(); SendEventToMain("bos:tray-navigate", "workspace"); });
+            menu.Items.Add(jyItem);
+            menu.Items.Add(wsItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("彻底退出 LazyCut", null, (s, e) => { _quitting = true; _mainForm.Close(); });
+            menu.Items.Add(quitItem);
+
+            menu.Opening += (s, e) =>
+            {
+                companionItem.Text = _companionVisible ? "隐藏悬浮窗" : "召唤悬浮窗";
+            };
 
             _tray = new NotifyIcon
             {
@@ -4620,7 +4791,7 @@ namespace XMStudioHost
                 ContextMenuStrip = menu,
                 Visible = true
             };
-            _tray.DoubleClick += (s, e) => { _mainForm.Show(); _mainForm.Activate(); };
+            _tray.DoubleClick += (s, e) => ActivateMainAndCompanion();
         }
 
         private string ChooseFolderDialog(string description, string initialFolder = null)
@@ -4915,10 +5086,22 @@ namespace XMStudioHost
         [STAThread]
         public static void Main()
         {
+            Win32.SetProcessDPIAware();
             bool createdNew;
             using (var mutex = new Mutex(true, "Global\\XiaomaEditingStudio_SingleInstance", out createdNew))
             {
-                if (!createdNew) return;
+                if (!createdNew)
+                {
+                    try
+                    {
+                        var req = (HttpWebRequest)WebRequest.Create(string.Format("http://127.0.0.1:{0}/__activate", StudioAppContext.AppPort));
+                        req.Proxy = null;
+                        req.Timeout = 1200;
+                        using (req.GetResponse()) { }
+                    }
+                    catch { }
+                    return;
+                }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new StudioAppContext());
