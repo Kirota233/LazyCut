@@ -74,6 +74,12 @@ const POSITION_OPTIONS: Array<{ id: WatermarkSettings['position']; label: string
   { id: 'center', label: '画面正中', desc: '强防盗中心醒目' },
 ];
 
+const CRF_QUALITY_OPTIONS: Array<{ crf: number; label: string; desc: string }> = [
+  { crf: 18, label: 'CRF 18 · 最高画质', desc: '12 Mbps 近无损清晰' },
+  { crf: 23, label: 'CRF 23 · 标准均衡', desc: '5 Mbps 清晰与速度兼顾' },
+  { crf: 28, label: 'CRF 28 · 极速轻量', desc: '2 Mbps 较小体积传输' },
+];
+
 const TEXT_PRESETS = [
   '内部样片 · 严禁外传',
   '初剪审片 · 禁止商用',
@@ -284,6 +290,29 @@ export function WatermarkStudio({ active }: WatermarkStudioProps) {
                 <div className="bos-wm-path-box" title="内置 watermark.png（红薯样片全画幅透明水印）">
                   ✓ 内置红薯样片 (watermark.png · 原版全画幅覆盖)
                 </div>
+              </div>
+            </div>
+
+            <div className="bos-wm-field-group">
+              <label className="bos-wm-label">输出画质（参考 watermarker 原版 CRF，18 为最高）</label>
+              <div className="bos-wm-pos-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                {CRF_QUALITY_OPTIONS.map(opt => {
+                  const currentCrf = Number(settings.crf || 23);
+                  const activeOpt = opt.crf === 18 ? currentCrf <= 18 : opt.crf === 28 ? currentCrf >= 28 : (currentCrf > 18 && currentCrf < 28);
+                  return (
+                    <button
+                      key={opt.crf}
+                      type="button"
+                      className={`bos-wm-pos-btn${activeOpt ? ' active' : ''}`}
+                      disabled={running}
+                      onClick={() => updateSettings({ crf: opt.crf })}
+                      title={opt.desc}
+                    >
+                      <strong>{opt.label}</strong>
+                      <span>{opt.desc}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

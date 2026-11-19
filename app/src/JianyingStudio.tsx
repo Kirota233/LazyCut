@@ -528,9 +528,9 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
           <small>检查并还原标准标点可将保护标点（․ ﹒ ‚ ﹐）还原为标准英文 . 与 , 且保持花字样式与时间轴不变。操作前请先退出剪映，写入前自动创建安全备份。</small>
         </ToolPanel>
 
-        <ToolPanel id="rename" number="03" title="批量改名" detail="支持集数模板或 AI 语义对齐，先预览后执行" hiddenStage={stage !== 'rename'}>
+        <ToolPanel id="rename" number="03" title="批量改名" detail="支持正则改名（含 18-1/2/3 子集）或 AI 语义对齐，先预览后执行" hiddenStage={stage !== 'rename'}>
           <div className="bos-source-choice">
-            <button type="button" aria-pressed={!aiRename} disabled={locked} onClick={() => setAiRename(false)}>按集数模板</button>
+            <button type="button" aria-pressed={!aiRename} disabled={locked} onClick={() => setAiRename(false)}>正则改名</button>
             <button type="button" aria-pressed={aiRename} disabled={locked} onClick={() => setAiRename(true)}>AI 智能命名</button>
           </div>
           <label>
@@ -543,7 +543,7 @@ export function JianyingStudio({ active, providers, onNavigate }: { active: bool
           </label>
           <label>
             <span>命名模板</span>
-            <input maxLength={500} value={template} disabled={locked} onChange={(event: any) => setTemplate(event.target.value)} placeholder="例如：短剧名称_第1集" />
+            <input maxLength={500} value={template} disabled={locked} onChange={(event: any) => setTemplate(event.target.value)} placeholder="例如：短剧名称_第1集 或 xxx18-1" />
           </label>
           <div className="bos-jy-toolbar">
             <button type="button" className={pendingAct === 'preview' ? 'is-loading' : ''} disabled={locked || !state.ready || (aiRename && !connection)} onClick={() => run('preview', { folder, template, ai: aiRename })}>

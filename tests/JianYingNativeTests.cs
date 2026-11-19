@@ -60,9 +60,53 @@ internal static class JianYingNativeTests
         Call("RegexPreview", "", "  标题第7集  ");
         plan = (List<Dictionary<string,object>>)Field("_plan");
         Check(plan.Count == 2 && (string)plan[0]["new_name"] == "标题第7集.mp4" && (string)plan[1]["new_name"] == "标题第8集.mp4", "individually selected unnumbered files use trimmed template start number");
+        string s1 = Path.Combine(dir, "离婚后18-1.mp4"), s2 = Path.Combine(dir, "离婚后18-2.mp4"), s3 = Path.Combine(dir, "离婚后18-3.mp4");
+        File.WriteAllText(s1, "1"); File.WriteAllText(s2, "2"); File.WriteAllText(s3, "3");
+        engine.Dispatch("files", Args("files", new[] { s1, s2, s3 }));
+        Call("RegexPreview", "", "xxx1");
+        plan = (List<Dictionary<string,object>>)Field("_plan");
+        Check(plan.Count == 3 && (string)plan[0]["new_name"] == "xxx18-1.mp4" && (string)plan[1]["new_name"] == "xxx18-2.mp4" && (string)plan[2]["new_name"] == "xxx18-3.mp4", "regex rename preserves X-1/X-2/X-3 split episode tokens");
+        Call("RegexPreview", "", "短剧_第1集");
+        plan = (List<Dictionary<string,object>>)Field("_plan");
+        Check(plan.Count == 3 && (string)plan[0]["new_name"] == "短剧_第18-1集.mp4" && (string)plan[1]["new_name"] == "短剧_第18-2集.mp4" && (string)plan[2]["new_name"] == "短剧_第18-3集.mp4", "regex rename supports split episode tokens with prefix and suffix");
         Call("ValidateRenamePlan", true); checks++;
         engine.Dispatch("files", Args("files", new string[0]));
         Check(((List<Dictionary<string,object>>)Field("_plan")).Count == 0, "clear selection clears preview without deleting files");
+
+        using (var localScreen = new Bitmap(1000, 600, PixelFormat.Format24bppRgb))
+        using (var lg = Graphics.FromImage(localScreen))
+        {
+            lg.Clear(Color.FromArgb(28, 28, 28));
+            using (var featureBrush = new SolidBrush(Color.FromArgb(70, 80, 95)))
+            using (var cardBrush = new SolidBrush(Color.FromArgb(145, 120, 105)))
+            {
+                // Top wide feature bar (must be ignored)
+                lg.FillRectangle(featureBrush, 100, 82, 110, 32);
+                lg.FillRectangle(featureBrush, 220, 82, 48, 32);
+                // Two rows of square draft cards (5 + 2 = 7 cards)
+                for (int col = 0; col < 5; col++) lg.FillRectangle(cardBrush, 100 + col * 60, 150, 44, 44);
+                for (int col = 0; col < 2; col++) lg.FillRectangle(cardBrush, 100 + col * 60, 220, 44, 44);
+            }
+            var detected = (List<Tuple<int, int, string>>)Call("DetectDraftCardsLocal", localScreen);
+            Check(detected.Count == 7 && detected[0].Item1 == 122 && detected[0].Item2 == 172 && detected[6].Item2 == 242, "local image grid detector locks all draft card centers without AI");
+            var res = (int[])engine.Snapshot()["resolution"];
+            var scopeType = typeof(JianYingEngine).GetNestedType("DraftScope", BindingFlags.NonPublic);
+            var scope = Activator.CreateInstance(scopeType);
+            scopeType.GetField("Box").SetValue(scope, new Rectangle(0, 0, res[0], res[1]));
+            scopeType.GetField("Width").SetValue(scope, res[0]);
+            scopeType.GetField("Height").SetValue(scope, res[1]);
+            scopeType.GetField("WindowBounds").SetValue(scope, new[] { 0, 0, res[0], res[1], 96 });
+            var savedDrafts = detected.Select(d => Tuple.Create(Math.Min(res[0] - 1, d.Item1), Math.Min(res[1] - 1, d.Item2), d.Item3)).ToList();
+            Call("SaveDraftGridCoords", savedDrafts, scope);
+            Check((bool)engine.Snapshot()["hasSavedDraftGrid"], "saved draft grid coords flagged in snapshot");
+            Set("_drafts", new List<Tuple<int, int, string>>());
+            engine.Dispatch("reuse_draft_coords", Args());
+            Check(((List<Tuple<int, int, string>>)Field("_drafts")).Count == 7, "reuse_draft_coords restores saved draft positions");
+            engine.Dispatch("settings", Args("scanMode", "ai"));
+            Check((string)engine.Snapshot()["scanMode"] == "ai", "settings persists ai scan mode");
+            engine.Dispatch("settings", Args("scanMode", "local"));
+            Check((string)engine.Snapshot()["scanMode"] == "local", "settings persists local scan mode");
+        }
     }
     private static string Scope(string heading) { return "{\"heading\":{\"text\":\"" + heading + "\",\"box\":{\"top\":200,\"left\":150,\"bottom\":230,\"right\":300}},\"region\":{\"top\":240,\"left\":150,\"bottom\":800,\"right\":800}}"; }
     private static string Card(int index) { int row = index / 5, col = index % 5; return "{\"kind\":\"draft\",\"name\":\"草稿" + index + "\",\"bounds\":{\"left\":" + (col * 190) + ",\"right\":" + (col * 190 + 150) + ",\"top\":" + (row * 300) + ",\"bottom\":" + (row * 300 + 200) + "}}"; }

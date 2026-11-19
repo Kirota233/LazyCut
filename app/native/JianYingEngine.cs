@@ -60,6 +60,9 @@ internal static class NativeWin32
     public static extern bool IsIconic(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    public static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     public static extern bool GetCursorPos(out POINT lpPoint);
 
     [DllImport("user32.dll")]
@@ -325,6 +328,7 @@ internal sealed partial class JianYingEngine
     private string _recordingTemplatePath = null;
 
     private string _exportMode = "return_home";
+    private string _scanMode = "local";
     private readonly Dictionary<string, double> _stepWaitsReturnHome = DefaultStepWaits();
     private readonly Dictionary<string, double> _stepWaitsWaitClose = DefaultStepWaits();
     private Dictionary<string, double> ActiveStepWaits { get { return _exportMode == "wait_close" ? _stepWaitsWaitClose : _stepWaitsReturnHome; } }
@@ -376,6 +380,7 @@ internal sealed partial class JianYingEngine
         _subtitleOutput = Directory.Exists(desktop) ? desktop : Path.Combine(_dataDir, "字幕导出");
 
         LoadConfig();
+        LoadSavedDraftGrid(true);
         if (string.IsNullOrWhiteSpace(_draftDir))
         {
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -459,6 +464,8 @@ internal sealed partial class JianYingEngine
             if (data == null) return;
             string mode = data.ContainsKey("export_mode") ? Convert.ToString(data["export_mode"]) : "";
             _exportMode = (mode == "return_home" || mode == "wait_close") ? mode : "return_home";
+            string scanMode = data.ContainsKey("scan_mode") ? Convert.ToString(data["scan_mode"]) : "";
+            _scanMode = (scanMode == "local" || scanMode == "ai") ? scanMode : "local";
 
             IDictionary legacy = data.ContainsKey("step_waits") ? data["step_waits"] as IDictionary : null;
             LoadWaits(_stepWaitsReturnHome, legacy); LoadWaits(_stepWaitsWaitClose, legacy);
@@ -494,6 +501,7 @@ internal sealed partial class JianYingEngine
             var payload = new Dictionary<string, object>
             {
                 { "export_mode", _exportMode },
+                { "scan_mode", _scanMode },
                 { "step_waits", ActiveStepWaits },
                 { "step_waits_return_home", _stepWaitsReturnHome },
                 { "step_waits_wait_close", _stepWaitsWaitClose },
@@ -789,6 +797,8 @@ internal sealed partial class JianYingEngine
                 { "exportProgress", _exportProgress == null ? null : new Dictionary<string, object>(_exportProgress) },
                 { "exporting", _exportActive },
                 { "mode", _exportMode },
+                { "scanMode", _scanMode },
+                { "hasSavedDraftGrid", HasSavedDraftGrid() },
                 { "waits", new Dictionary<string, double>(ActiveStepWaits) },
                 { "waitsReturnHome", new Dictionary<string, double>(_stepWaitsReturnHome) },
                 { "waitsWaitClose", new Dictionary<string, double>(_stepWaitsWaitClose) },
@@ -1441,16 +1451,50 @@ internal sealed partial class JianYingEngine
         return true;
     }
 
+    private static string ExtractEpisodeToken(string stem)
+    {
+        string cleaned = Regex.Replace(stem ?? "", @"\(\d+\)\s*$", "").Trim();
+        Match m1 = Regex.Match(cleaned, @"第\s*0*(\d+)\s*(?:-\s*0*(\d+)\s*集|集\s*-\s*0*(\d+)|集)");
+        if (m1.Success)
+        {
+            string mainEp = m1.Groups[1].Value;
+            string subEp = m1.Groups[2].Success ? m1.Groups[2].Value : (m1.Groups[3].Success ? m1.Groups[3].Value : "");
+            return string.IsNullOrEmpty(subEp) ? mainEp : (mainEp + "-" + subEp);
+        }
+        Match m2 = Regex.Match(cleaned, @"(?<![\d-])0*(\d+)\s*(?:-\s*0*(\d+)\s*集|集\s*-\s*0*(\d+)|集)");
+        if (m2.Success)
+        {
+            string mainEp = m2.Groups[1].Value;
+            string subEp = m2.Groups[2].Success ? m2.Groups[2].Value : (m2.Groups[3].Success ? m2.Groups[3].Value : "");
+            return string.IsNullOrEmpty(subEp) ? mainEp : (mainEp + "-" + subEp);
+        }
+        MatchCollection all = Regex.Matches(cleaned, @"\d+(?:-\d+)?");
+        if (all.Count > 0)
+        {
+            string token = all[all.Count - 1].Value;
+            int dashIdx = token.IndexOf('-');
+            if (dashIdx > 0)
+            {
+                string left = token.Substring(0, dashIdx).TrimStart('0');
+                string right = token.Substring(dashIdx + 1).TrimStart('0');
+                if (string.IsNullOrEmpty(left)) left = "0";
+                if (string.IsNullOrEmpty(right)) right = "0";
+                return left + "-" + right;
+            }
+            string num = token.TrimStart('0');
+            return string.IsNullOrEmpty(num) ? "0" : num;
+        }
+        return null;
+    }
+
     private static int? ExtractEpisodeNumber(string stem)
     {
-        string cleaned = Regex.Replace(stem, @"\(\d+\)\s*$", "").Trim();
-        Match m1 = Regex.Match(cleaned, @"第\s*(\d+)\s*集");
-        if (m1.Success) return int.Parse(m1.Groups[1].Value, CultureInfo.InvariantCulture);
-        Match m2 = Regex.Match(cleaned, @"(\d+)\s*集");
-        if (m2.Success) return int.Parse(m2.Groups[1].Value, CultureInfo.InvariantCulture);
-        MatchCollection all = Regex.Matches(cleaned, @"\d+");
-        if (all.Count > 0) return int.Parse(all[all.Count - 1].Value, CultureInfo.InvariantCulture);
-        return null;
+        string token = ExtractEpisodeToken(stem);
+        if (string.IsNullOrEmpty(token)) return null;
+        int dashIdx = token.IndexOf('-');
+        string head = dashIdx > 0 ? token.Substring(0, dashIdx) : token;
+        int val;
+        return int.TryParse(head, NumberStyles.Integer, CultureInfo.InvariantCulture, out val) ? (int?)val : null;
     }
 
     private void ValidateRenamePlan(bool capture)
@@ -1509,10 +1553,10 @@ internal sealed partial class JianYingEngine
             throw new InvalidOperationException("请选择存在的目标文件夹或拖入待改名文件。");
         }
         template = (template ?? "").Trim();
-        Match m = Regex.Match(template, @"\d+");
+        Match m = Regex.Match(template, @"\d+(?:-\d+)?");
         if (!m.Success)
         {
-            throw new InvalidOperationException("模板必须包含一个数字，例如：短剧名称_第1集");
+            throw new InvalidOperationException("模板必须包含一个数字，例如：短剧名称_第1集 或 xxx18-1");
         }
         string prefix = template.Substring(0, m.Index);
         string suffix = template.Substring(m.Index + m.Length);
@@ -1530,11 +1574,12 @@ internal sealed partial class JianYingEngine
         foreach (var fi in files)
         {
             string stem = Path.GetFileNameWithoutExtension(fi.Name);
-            int? ep = ExtractEpisodeNumber(stem);
-            string newName = ep.HasValue ? prefix + ep.Value + suffix + fi.Extension : null;
+            string epToken = ExtractEpisodeToken(stem);
+            string newName = !string.IsNullOrEmpty(epToken) ? prefix + epToken + suffix + fi.Extension : null;
             if (newName == null || usedTargets.Contains(Path.Combine(fi.DirectoryName, newName))) {
                 if (!string.IsNullOrWhiteSpace(folder)) continue;
-                int first; if (!int.TryParse(m.Value, out first)) throw new InvalidOperationException("模板起始数字过大。");
+                Match firstNum = Regex.Match(m.Value, @"\d+");
+                int first; if (!firstNum.Success || !int.TryParse(firstNum.Value, out first)) throw new InvalidOperationException("模板起始数字过大。");
                 int candidate = checked(first + plan.Count);
                 do { newName = prefix + candidate + suffix + fi.Extension; candidate = checked(candidate + 1); }
                 while (usedTargets.Contains(Path.Combine(fi.DirectoryName, newName)) || File.Exists(Path.Combine(fi.DirectoryName, newName)) && !string.Equals(fi.FullName, Path.Combine(fi.DirectoryName, newName), StringComparison.OrdinalIgnoreCase));
@@ -1546,7 +1591,7 @@ internal sealed partial class JianYingEngine
                 { "target", Path.Combine(fi.DirectoryName, newName) },
                 { "old_name", fi.Name },
                 { "new_name", newName },
-                { "mode", "正则匹配" }
+                { "mode", "正则改名" }
             });
         }
         _plan = plan;
@@ -2045,7 +2090,21 @@ internal sealed partial class JianYingEngine
             case "scan":
                 _webScan = args.Contains("webScan") && args["webScan"] is bool && (bool)args["webScan"];
                 _scanModelKey = args.Contains("modelKey") ? Convert.ToString(args["modelKey"]) : null;
+                if (args.Contains("scanMode"))
+                {
+                    string reqScanMode = Convert.ToString(args["scanMode"]);
+                    if (reqScanMode == "local" || reqScanMode == "ai")
+                    {
+                        _scanMode = reqScanMode;
+                        SaveConfig();
+                    }
+                }
                 BeginOperation(RunScopedScan);
+                break;
+
+            case "reuse_draft_coords":
+            case "reuse-draft-coords":
+                ReuseSavedDraftCoords();
                 break;
 
             case "wizard":
@@ -2084,7 +2143,7 @@ internal sealed partial class JianYingEngine
                     if (_resolutionMismatch) throw new InvalidOperationException("显示分辨率与模板不同，请重新录制坐标。");
                     if (!ModeCoordsReady()) throw new InvalidOperationException("请先录制完整坐标。");
                     ValidateExportCoordinates(_exportMode);
-                    if (_drafts.Count == 0) throw new InvalidOperationException("请先 AI 扫描首页。");
+                    if (_drafts.Count == 0) throw new InvalidOperationException("请先识别或复用首页草稿坐标。");
                     ValidateDraftQueue();
                     if (idx < 0 || idx >= _drafts.Count) idx = 0;
                     string nm = _drafts[idx].Item3;
@@ -2254,9 +2313,17 @@ internal sealed partial class JianYingEngine
                         }
                     }
                     // Validate the whole request before mutating either profile.
+                    string nextScanMode = _scanMode;
+                    if (args.Contains("scanMode"))
+                    {
+                        string sm = Convert.ToString(args["scanMode"]);
+                        if (sm != "local" && sm != "ai") throw new InvalidOperationException("坐标识别模式无效。");
+                        nextScanMode = sm;
+                    }
                     foreach (var pair in next) target[pair.Key] = pair.Value;
                     bool modeChanged = _exportMode != mode;
                     _exportMode = mode;
+                    _scanMode = nextScanMode;
                     if (modeChanged) EnsureModeTemplateLoaded();
                     SaveConfig();
                     RefreshGuideBadge();

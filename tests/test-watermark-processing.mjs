@@ -143,6 +143,7 @@ test('Native WatermarkStudio UI and Bottom-Right Radial BatchTray render without
   const wmText = textOf(wmTree);
   assert.match(wmText, /实时画面水印预览/);
   assert.match(wmText, /C# 原生硬件加速/);
+  assert.match(wmText, /CRF 18 · 最高画质/);
   assert.match(wmText, /原版全画幅覆盖/);
   assert.match(wmText, /红薯样片/);
   assert.match(wmText, /批量视频处理队列/);

@@ -2129,7 +2129,7 @@ namespace XMStudioHost
 
     internal sealed partial class StudioAppContext : ApplicationContext
     {
-        public const string CurrentVersion = "1.8.6";
+        public const string CurrentVersion = "1.8.7";
         public const int AppPort = 37651;
         private readonly string _baseDir;
         private readonly string _userDataDir;
@@ -3169,6 +3169,16 @@ namespace XMStudioHost
                         job["outputPath"] = ResolveWmOutputPath(Convert.ToString(job["inputPath"]), sameDir);
                         BroadcastWatermarkState();
 
+                        int wmCrf = 23;
+                        try
+                        {
+                            if (_wmSettings.ContainsKey("crf") && _wmSettings["crf"] != null)
+                                wmCrf = Math.Max(15, Math.Min(35, Convert.ToInt32(_wmSettings["crf"])));
+                        }
+                        catch { wmCrf = 23; }
+                        string wmSize = (_wmSettings.ContainsKey("size") && _wmSettings["size"] != null)
+                            ? Convert.ToString(_wmSettings["size"])
+                            : "original";
                         try
                         {
                             var res = await _watermarkRpc.CallAsync(new Dictionary<string, object>
@@ -3181,8 +3191,8 @@ namespace XMStudioHost
                                 { "position", "fullscreen" },
                                 { "opacity", 1.0 },
                                 { "scale", 1.0 },
-                                { "size", "original" },
-                                { "crf", 23 }
+                                { "size", wmSize },
+                                { "crf", wmCrf }
                             });
                             job["status"] = "done";
                             job["progress"] = 100;
@@ -3940,6 +3950,11 @@ namespace XMStudioHost
             if (action == "wm-start") { StartWatermarkBatch(true); return BroadcastCompanionState(); }
             if (action == "wm-cancel") { await CancelWatermarkBatchAsync(); return BroadcastCompanionState(); }
             if (action == "wm-open") { OpenExplorerPath(Convert.ToString(value)); return BroadcastCompanionState(); }
+            if (action == "wm-settings" && value is Dictionary<string, object>)
+            {
+                UpdateWatermarkSettings((Dictionary<string, object>)value);
+                return BroadcastCompanionState();
+            }
             if (action == "jy-wizard")
             {
                 var wArgs = value is Dictionary<string, object> ? (Dictionary<string, object>)value : new Dictionary<string, object>();
@@ -3956,12 +3971,20 @@ namespace XMStudioHost
             {
                 var scanPayload = new Dictionary<string, object> { { "action", "scan" } };
                 var vDict = value as Dictionary<string, object>;
-                if (vDict != null && vDict.ContainsKey("modelKey"))
+                var scanArgs = new Dictionary<string, object>();
+                if (vDict != null)
                 {
-                    scanPayload["args"] = new Dictionary<string, object> { { "modelKey", vDict["modelKey"] } };
+                    if (vDict.ContainsKey("modelKey")) scanArgs["modelKey"] = vDict["modelKey"];
+                    if (vDict.ContainsKey("scanMode")) scanArgs["scanMode"] = vDict["scanMode"];
                 }
+                if (scanArgs.Count > 0) scanPayload["args"] = scanArgs;
                 try { await HandleJianyingActionAsync(scanPayload); }
                 catch { RestorePanelAfterScan(); throw; }
+                return BroadcastCompanionState();
+            }
+            if (action == "jy-reuse-coords")
+            {
+                await HandleJianyingActionAsync(new Dictionary<string, object> { { "action", "reuse_draft_coords" } });
                 return BroadcastCompanionState();
             }
             if (action == "jy-clear-rename-files")

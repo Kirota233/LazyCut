@@ -526,6 +526,14 @@ function panelHtml(acrylic) {
           <button type="button" class="btn" id="jyModeWaitClose" data-mode="wait_close">等待完成 · 逐个</button>
         </div>
       </div>
+      <div class="field">
+        <span>坐标识别模式（支持免 AI 本地图像识别与复用）</span>
+        <div class="grid" id="jyScanModeBox" role="radiogroup" aria-label="草稿坐标识别模式">
+          <button type="button" class="btn active" id="jyScanModeLocal" data-scan-mode="local">📐 图像识别 (免AI·可复用)</button>
+          <button type="button" class="btn" id="jyScanModeAi" data-scan-mode="ai">🤖 AI 视觉识别</button>
+        </div>
+      </div>
+      <div class="log" id="jyLocalScanTip" style="border:1px solid rgba(255,207,110,.32);background:rgba(255,207,110,.08);color:#ffe4a0">💡 免 AI 模式：请将剪映首页【最大化】并【下滑到底】后点击「📸 识别坐标」，识别后坐标自动保存可随时复用</div>
       <div class="row">
         <div class="title"><span class="dot" id="jyDot"></span><span id="jyMeta">就绪</span></div>
         <button class="btn danger" id="jyStop" style="padding:3px 8px;font-size:10px">中断 · F10</button>
@@ -535,10 +543,13 @@ function panelHtml(acrylic) {
         <span class="hk"><kbd>F9</kbd>跳过等待</span>
         <span class="hk"><kbd>F10</kbd>紧急中断</span>
       </div>
-      <div class="log" id="jyGuideBox">打开剪映首页后，可录制坐标或 AI 扫描草稿列表。</div>
-      <div class="grid-3">
+      <div class="log" id="jyGuideBox">打开剪映首页后，可录制坐标、图像识别草稿或复用已保存坐标。</div>
+      <div class="grid">
         <button class="btn" id="jyWizard">🎯 录制坐标</button>
-        <button class="btn" id="jyScan">📸 截图识别</button>
+        <button class="btn" id="jyScan">📸 识别坐标</button>
+      </div>
+      <div class="grid">
+        <button class="btn" id="jyReuseCoords" title="直接加载上次保存的草稿列表坐标，免重新扫描">♻️ 复用坐标</button>
         <button class="btn primary" id="jyExport">🚀 批量导出</button>
       </div>
       <button class="btn" id="jySplitDraftsExport" type="button" title="检测草稿目录中以「-1」结尾的文件夹，复制为「XXX-2」并将原草稿出点设为入点">✂️ 检测「XXX-1」复制为「XXX-2」（原出点设入点）</button>
@@ -548,12 +559,12 @@ function panelHtml(acrylic) {
         <table>
           <thead><tr><th style="width:42px">起点</th><th>草稿名称</th><th style="width:64px">状态</th></tr></thead>
           <tbody id="jyQueueBody">
-            <tr><td colspan="3" class="empty-tip">点击「📸 截图识别」AI 扫描剪映首页草稿</td></tr>
+            <tr><td colspan="3" class="empty-tip">点击「📸 识别坐标」识别草稿，或点击「♻️ 复用坐标」加载已存坐标</td></tr>
           </tbody>
         </table>
       </div>
 
-      <div class="field">
+      <div class="field" id="jyAiModelWrap" hidden>
         <span>AI 视觉识别模型（已配置供应商-模型）</span>
         <select class="select" id="jyModelSelect">
           <option value="">请先在主窗口添加可用模型</option>
@@ -622,12 +633,12 @@ function panelHtml(acrylic) {
         </div>
       </div>
       <div class="grid">
-        <button class="btn active" id="renameModeTpl">按集数模板</button>
+        <button class="btn active" id="renameModeTpl">正则改名</button>
         <button class="btn" id="renameModeAi">AI 智能命名</button>
       </div>
       <div class="field">
-        <span>命名模板</span>
-        <input class="input" id="renameTemplate" value="短剧名称_第1集" placeholder="例如：短剧名称_第1集" />
+        <span>命名模板（支持 X-1 / X-2 / X-3 子集）</span>
+        <input class="input" id="renameTemplate" value="短剧名称_第1集" placeholder="例如：短剧名称_第1集 或 xxx18-1" />
       </div>
       <div class="grid">
         <button class="btn" id="jyPreviewRename">生成改名预览</button>
@@ -665,6 +676,14 @@ function panelHtml(acrylic) {
       </div>
       <div class="bar"><i id="wmBar"></i></div>
       <div class="jobs" id="wmJobs"></div>
+      <div class="field">
+        <span>输出画质（CRF 18 为最高画质）</span>
+        <div class="grid-3" id="wmQualityBox">
+          <button type="button" class="btn" id="wmCrf18" data-crf="18" title="12 Mbps 最高画质">18 最高</button>
+          <button type="button" class="btn active" id="wmCrf23" data-crf="23" title="5 Mbps 标准均衡">23 标准</button>
+          <button type="button" class="btn" id="wmCrf28" data-crf="28" title="2 Mbps 极速轻量">28 极速</button>
+        </div>
+      </div>
       <div class="grid">
         <button class="btn" id="wmAdd">＋ 添加视频</button>
         <button class="btn primary" id="wmRun">开始合成</button>
@@ -688,13 +707,47 @@ function panelHtml(acrylic) {
   <script>
     const api = window.blackObsidian, $ = id => document.getElementById(id);
     let state = null, toastTimer = 0, currentStage = localStorage.getItem('xm.jianying.stage') || 'export';
-    let selectedDraftIdx = 0, aiRenameMode = false, renameFolder = '', waitsDirty = false, lastForceStageToken = '', showJyParams = false, lastJyNotice = '', currentExportMode = 'return_home';
+    let selectedDraftIdx = 0, aiRenameMode = false, renameFolder = '', waitsDirty = false, lastForceStageToken = '', showJyParams = false, lastJyNotice = '', currentExportMode = 'return_home', currentScanMode = localStorage.getItem('xm.jianying.scanMode') || 'local';
     let modelOptions = [], lastModelsSignature = '';
 
     function updateModeButtons(mode) {
       currentExportMode = mode === 'wait_close' ? 'wait_close' : 'return_home';
       if ($('jyModeReturnHome')) $('jyModeReturnHome').classList.toggle('active', currentExportMode === 'return_home');
       if ($('jyModeWaitClose')) $('jyModeWaitClose').classList.toggle('active', currentExportMode === 'wait_close');
+    }
+
+    function updateScanModeUI(mode) {
+      currentScanMode = mode === 'ai' ? 'ai' : 'local';
+      try { localStorage.setItem('xm.jianying.scanMode', currentScanMode); } catch {}
+      if ($('jyScanModeLocal')) $('jyScanModeLocal').classList.toggle('active', currentScanMode === 'local');
+      if ($('jyScanModeAi')) $('jyScanModeAi').classList.toggle('active', currentScanMode === 'ai');
+      if ($('jyLocalScanTip')) $('jyLocalScanTip').hidden = currentScanMode !== 'local';
+      if ($('jyAiModelWrap')) $('jyAiModelWrap').hidden = currentScanMode !== 'ai';
+    }
+    updateScanModeUI(currentScanMode);
+
+    function extractEpTokenClient(stem) {
+      const cleaned = String(stem || '').replace(/\\(\\d+\\)\\s*$/, '').trim();
+      const m1 = cleaned.match(/第\\s*0*(\\d+)\\s*(?:-\\s*0*(\\d+)\\s*集|集\\s*-\\s*0*(\\d+)|集)/);
+      if (m1) {
+        const sub = m1[2] || m1[3] || '';
+        return sub ? (m1[1] + '-' + sub) : m1[1];
+      }
+      const m2 = cleaned.match(/(?:^|[^\\d-])0*(\\d+)\\s*(?:-\\s*0*(\\d+)\\s*集|集\\s*-\\s*0*(\\d+)|集)/);
+      if (m2) {
+        const sub = m2[2] || m2[3] || '';
+        return sub ? (m2[1] + '-' + sub) : m2[1];
+      }
+      const all = cleaned.match(/\\d+(?:-\\d+)?/g);
+      if (all && all.length) {
+        const tok = all[all.length - 1];
+        if (tok.indexOf('-') > 0) {
+          const p = tok.split('-');
+          return (p[0].replace(/^0+/, '') || '0') + '-' + (p[1].replace(/^0+/, '') || '0');
+        }
+        return tok.replace(/^0+/, '') || '0';
+      }
+      return '';
     }
 
     const toast = msg => {
@@ -879,7 +932,9 @@ function panelHtml(acrylic) {
       const jyRun = jy.busy || jy.exporting || jy.recording;
       $('jyDot').className = 'dot ' + (jyRun ? 'run' : jy.ready ? 'on' : '');
       $('jyMeta').textContent = jy.status || '就绪';
-      $('jyGuideBox').textContent = jy.guide || jy.lastLog || '打开剪映首页后，可录制坐标或 AI 扫描草稿列表。';
+      $('jyGuideBox').textContent = jy.guide || jy.lastLog || '打开剪映首页后，可录制坐标、图像识别草稿或复用已保存坐标。';
+      if (jy.scanMode) updateScanModeUI(jy.scanMode);
+      if ($('jyReuseCoords')) $('jyReuseCoords').disabled = jyRun || !jy.ready || !jy.hasSavedDraftGrid;
       const allLogs = Array.isArray(jy.logs) ? jy.logs : [];
       const exportLogs = allLogs.filter(l => !/✓\\s+.*\\.srt|统一\\s+Noto|恢复所有草稿字幕|还原标准标点|受保护标点/i.test(l));
       if ($('jyLog_export')) {
@@ -916,7 +971,7 @@ function panelHtml(acrylic) {
       if (selectedDraftIdx >= queue.length) selectedDraftIdx = 0;
       const qBody = $('jyQueueBody');
       if (!queue.length) {
-        qBody.innerHTML = '<tr><td colspan="3" class="empty-tip">点击「📸 截图识别」AI 扫描剪映首页草稿</td></tr>';
+        qBody.innerHTML = '<tr><td colspan="3" class="empty-tip">点击「📸 识别坐标」识别草稿，或点击「♻️ 复用坐标」加载已存坐标</td></tr>';
       } else {
         qBody.innerHTML = '';
         queue.forEach((item, idx) => {
@@ -969,8 +1024,19 @@ function panelHtml(acrylic) {
           const base = String(fp || '').split(/[\\\\/]/).pop() || fp;
           const extMatch = base.match(/(\\.[^.]+)$/);
           const ext = extMatch ? extMatch[1] : '';
-          const tpl = ($('renameTemplate').value.trim() || '短剧名称_第1集').replace(/(\\d+)(?!.*\\d)/, m => String(Number(m) + i));
-          return '<tr><td>' + String(base).replace(/</g, '&lt;') + '</td><td style="color:#ffcf6e">' + String(tpl + ext).replace(/</g, '&lt;') + ' (点上方生成预览确认)</td></tr>';
+          const stem = ext ? base.slice(0, -ext.length) : base;
+          const epTok = extractEpTokenClient(stem);
+          const rawTpl = $('renameTemplate').value.trim() || '短剧名称_第1集';
+          let nextStem;
+          if (epTok) {
+            nextStem = rawTpl.replace(/\\d+(?:-\\d+)?/, epTok);
+          } else {
+            nextStem = rawTpl.replace(/\\d+(?:-\\d+)?/, m => {
+              const baseNum = Number((m.split('-')[0] || '1')) || 1;
+              return String(baseNum + i);
+            });
+          }
+          return '<tr><td>' + String(base).replace(/</g, '&lt;') + '</td><td style="color:#ffcf6e">' + String(nextStem + ext).replace(/</g, '&lt;') + ' (点上方生成预览确认)</td></tr>';
         }).join('');
       } else {
         pBody.innerHTML = '<tr><td colspan="2" class="empty-tip">拖入文件并选择模式后点击「生成改名预览」</td></tr>';
@@ -990,6 +1056,10 @@ function panelHtml(acrylic) {
         }
       }
 
+      const curCrf = Number(wm.settings?.crf || 23);
+      if ($('wmCrf18')) $('wmCrf18').classList.toggle('active', curCrf <= 18);
+      if ($('wmCrf23')) $('wmCrf23').classList.toggle('active', curCrf > 18 && curCrf < 28);
+      if ($('wmCrf28')) $('wmCrf28').classList.toggle('active', curCrf >= 28);
       $('wmDot').className = 'dot ' + (wm.running ? 'run' : wm.totalCount ? 'on' : '');
       $('wmMeta').textContent = wm.totalCount ? wm.completedCount + '/' + wm.totalCount + ' · ' + wm.overallProgress + '%' : '空闲';
       $('wmBar').style.width = (wm.overallProgress || 0) + '%';
@@ -1063,7 +1133,16 @@ function panelHtml(acrylic) {
     if ($('jyDismissWizardGuide')) $('jyDismissWizardGuide').onclick = () => { wizardGuideDismissed = true; $('wizardGuideModalOverlay').hidden = true; };
     if ($('jyCloseWizardGuideTop')) $('jyCloseWizardGuideTop').onclick = () => { wizardGuideDismissed = true; $('wizardGuideModalOverlay').hidden = true; };
     if ($('jyStopWizardFromModal')) $('jyStopWizardFromModal').onclick = () => { wizardGuideDismissed = true; $('wizardGuideModalOverlay').hidden = true; act('jy-stop'); };
-    $('jyScan').onclick = () => act('jy-scan', { modelKey: $('jyModelSelect').value, connection: getSelectedModelConnection() }, $('jyScan'), '识别中…');
+    if ($('jyScanModeLocal')) $('jyScanModeLocal').onclick = () => {
+      updateScanModeUI('local');
+      act('jy-settings', { mode: currentExportMode, scanMode: 'local' });
+    };
+    if ($('jyScanModeAi')) $('jyScanModeAi').onclick = () => {
+      updateScanModeUI('ai');
+      act('jy-settings', { mode: currentExportMode, scanMode: 'ai' });
+    };
+    if ($('jyReuseCoords')) $('jyReuseCoords').onclick = () => act('jy-reuse-coords', null, $('jyReuseCoords'), '加载中…');
+    $('jyScan').onclick = () => act('jy-scan', { scanMode: currentScanMode, modelKey: $('jyModelSelect').value, connection: getSelectedModelConnection() }, $('jyScan'), '识别中…');
     $('jyExport').onclick = () => act('jy-export', { index: selectedDraftIdx }, $('jyExport'), '启动导出…');
     $('jyStop').onclick = () => act('jy-stop');
     function populateWaitsInputs(mode, waitsData) {
@@ -1200,6 +1279,9 @@ function panelHtml(acrylic) {
     $('wmAdd').onclick = () => act('wm-add');
     $('wmClear').onclick = () => act('wm-clear', null, $('wmClear'), '清除中…');
     $('wmRun').onclick = () => act(state?.watermark?.running ? 'wm-cancel' : 'wm-start', null, $('wmRun'), '启动中…');
+    ['wmCrf18', 'wmCrf23', 'wmCrf28'].forEach(id => {
+      if ($(id)) $(id).onclick = () => act('wm-settings', { crf: Number($(id).dataset.crf) || 23 });
+    });
     $('launchJy').onclick = () => act('launch-jy', null, $('launchJy'), '启动剪映中…');
     $('openMain').onclick = () => act('navigate', '');
 

@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -363,13 +364,354 @@ bounds 紧贴每张草稿缩略图封面本身，不包含底部文字标题与�
         return drafts.OrderBy(d => Math.Round(d.Item2 / 100.0)).ThenBy(d => d.Item1).ToList();
     }
 
+    private string DraftGridFile()
+    {
+        return Path.Combine(_dataDir, "draft_grid_coords.json");
+    }
+
+    private bool HasSavedDraftGrid()
+    {
+        try { return File.Exists(DraftGridFile()); } catch { return false; }
+    }
+
+    private void SaveDraftGridCoords(List<Tuple<int, int, string>> drafts, DraftScope scope)
+    {
+        if (drafts == null || scope == null) return;
+        try
+        {
+            var payload = new Dictionary<string, object>
+            {
+                { "version", 1 },
+                { "screen_resolution", new[] { scope.Width, scope.Height } },
+                { "window_bounds", scope.WindowBounds },
+                { "box", new[] { scope.Box.X, scope.Box.Y, scope.Box.Width, scope.Box.Height } },
+                { "saved_at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) },
+                { "drafts", drafts.Select(d => new Dictionary<string, object> { { "x", d.Item1 }, { "y", d.Item2 }, { "name", d.Item3 } }).ToList() }
+            };
+            AtomicWriteJson(DraftGridFile(), payload);
+        }
+        catch { }
+    }
+
+    private bool LoadSavedDraftGrid(bool quiet)
+    {
+        string path = DraftGridFile();
+        if (!File.Exists(path))
+        {
+            if (!quiet) throw new InvalidOperationException("尚未保存过可复用的草稿坐标，请先点击「📸 识别坐标」识别一次。");
+            return false;
+        }
+        try
+        {
+            var data = _json.Deserialize<Dictionary<string, object>>(File.ReadAllText(path, Encoding.UTF8));
+            if (data == null || !data.ContainsKey("screen_resolution") || !data.ContainsKey("drafts"))
+            {
+                if (!quiet) throw new InvalidOperationException("已保存的草稿坐标文件无效，请重新识别一次。");
+                return false;
+            }
+            var resList = data["screen_resolution"] as IList;
+            int[] sysRes = GetScreenResolution();
+            if (resList == null || resList.Count != 2 || Convert.ToInt32(resList[0]) != sysRes[0] || Convert.ToInt32(resList[1]) != sysRes[1])
+            {
+                if (!quiet) throw new InvalidOperationException("当前屏幕分辨率与上次保存的坐标不一致，请重新识别一次。");
+                return false;
+            }
+            var boxList = data.ContainsKey("box") ? data["box"] as IList : null;
+            Rectangle box = (boxList != null && boxList.Count == 4)
+                ? new Rectangle(Convert.ToInt32(boxList[0]), Convert.ToInt32(boxList[1]), Convert.ToInt32(boxList[2]), Convert.ToInt32(boxList[3]))
+                : new Rectangle(0, 0, sysRes[0], sysRes[1]);
+            int[] winBounds = null;
+            var wbList = data.ContainsKey("window_bounds") ? data["window_bounds"] as IList : null;
+            if (wbList != null && wbList.Count == 5)
+            {
+                winBounds = new int[5];
+                for (int i = 0; i < 5; i++) winBounds[i] = Convert.ToInt32(wbList[i]);
+            }
+            var rawDrafts = data["drafts"] as IList;
+            var loaded = new List<Tuple<int, int, string>>();
+            if (rawDrafts != null)
+            {
+                foreach (object itemObj in rawDrafts)
+                {
+                    var item = itemObj as IDictionary;
+                    if (item == null) continue;
+                    int x = Convert.ToInt32(item["x"]);
+                    int y = Convert.ToInt32(item["y"]);
+                    string name = Convert.ToString(item["name"]) ?? "";
+                    if (!box.Contains(x, y) || string.IsNullOrWhiteSpace(name)) continue;
+                    loaded.Add(Tuple.Create(x, y, name));
+                }
+            }
+            if (loaded.Count == 0)
+            {
+                if (!quiet) throw new InvalidOperationException("已保存的草稿坐标为空，请重新识别一次。");
+                return false;
+            }
+            var scope = new DraftScope
+            {
+                Box = box,
+                Width = sysRes[0],
+                Height = sysRes[1],
+                Window = NativeWin32.FindJianyingWindow(),
+                WindowBounds = winBounds
+            };
+            lock (_lock)
+            {
+                _drafts = loaded;
+                _draftScope = scope;
+                _queue = loaded.Select(d => new Dictionary<string, object> { { "name", d.Item3 }, { "st", "待处理" } }).ToList();
+            }
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            if (!quiet) throw;
+            return false;
+        }
+        catch
+        {
+            if (!quiet) throw new InvalidOperationException("读取已保存草稿坐标失败，请重新识别一次。");
+            return false;
+        }
+    }
+
+    private void ReuseSavedDraftCoords()
+    {
+        if (LoadSavedDraftGrid(false))
+        {
+            int count;
+            lock (_lock) { count = _drafts.Count; _status = "已复用 " + count + " 个草稿坐标"; }
+            Log("已载入复用草稿坐标：共 " + count + " 个草稿");
+        }
+    }
+
+    private static List<Tuple<int, int, string>> DetectDraftCardsLocal(Bitmap sourceBitmap)
+    {
+        if (sourceBitmap == null || sourceBitmap.Width < 200 || sourceBitmap.Height < 200)
+            return new List<Tuple<int, int, string>>();
+
+        Bitmap owned24 = null;
+        Bitmap bmp = sourceBitmap;
+        if (sourceBitmap.PixelFormat != PixelFormat.Format24bppRgb)
+        {
+            owned24 = new Bitmap(sourceBitmap.Width, sourceBitmap.Height, PixelFormat.Format24bppRgb);
+            using (var g = Graphics.FromImage(owned24))
+            {
+                g.DrawImage(sourceBitmap, 0, 0, sourceBitmap.Width, sourceBitmap.Height);
+            }
+            bmp = owned24;
+        }
+
+        try
+        {
+            int w = bmp.Width, h = bmp.Height;
+            int xMin = (int)Math.Round(w * 0.088);
+            int xMax = (int)Math.Round(w * 0.985);
+            int yMin = (int)Math.Round(h * 0.06);
+            int yMax = (int)Math.Round(h * 0.94);
+
+            BitmapData bd = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+            byte[] pixels = new byte[Math.Abs(bd.Stride) * h];
+            int stride = Math.Abs(bd.Stride);
+            try
+            {
+                Marshal.Copy(bd.Scan0, pixels, 0, pixels.Length);
+            }
+            finally
+            {
+                bmp.UnlockBits(bd);
+            }
+
+            int bgR = 28, bgG = 28, bgB = 28;
+            var samples = new List<int>();
+            int stepY = Math.Max(2, h / 60);
+            int stepX = Math.Max(4, w / 80);
+            for (int y = yMin; y < yMax; y += stepY)
+            {
+                int rowOff = y * stride;
+                for (int x = xMin; x < xMax; x += stepX)
+                {
+                    int off = rowOff + x * 3;
+                    int b = pixels[off], gr = pixels[off + 1], r = pixels[off + 2];
+                    int maxC = Math.Max(r, Math.Max(gr, b));
+                    int minC = Math.Min(r, Math.Min(gr, b));
+                    if (maxC - minC <= 8 && maxC >= 14 && maxC <= 42)
+                    {
+                        samples.Add((r + gr + b) / 3);
+                    }
+                }
+            }
+            if (samples.Count > 20)
+            {
+                samples.Sort();
+                int med = samples[samples.Count / 2];
+                bgR = bgG = bgB = med;
+            }
+
+            Func<int, int, List<Rectangle>> getCols = (y0, y1) =>
+            {
+                int bh = y1 - y0 + 1;
+                int[] colAct = new int[w];
+                for (int y = y0; y <= y1; y++)
+                {
+                    int rowOff = y * stride;
+                    for (int x = xMin; x < xMax; x++)
+                    {
+                        int off = rowOff + x * 3;
+                        int d = Math.Abs(pixels[off + 2] - bgR) + Math.Abs(pixels[off + 1] - bgG) + Math.Abs(pixels[off] - bgB);
+                        if (d > 15) colAct[x]++;
+                    }
+                }
+                int thresh = Math.Max(3, (int)Math.Round(bh * 0.30));
+                var segs = new List<Rectangle>();
+                int minCardW = Math.Max(12, (int)Math.Round(w * 0.024));
+                bool inSeg = false;
+                int s0 = 0;
+                for (int x = xMin; x < xMax; x++)
+                {
+                    if (colAct[x] >= thresh)
+                    {
+                        if (!inSeg) { inSeg = true; s0 = x; }
+                    }
+                    else if (inSeg)
+                    {
+                        inSeg = false;
+                        int sw = x - s0;
+                        if (sw >= minCardW) segs.Add(new Rectangle(s0, y0, sw, bh));
+                    }
+                }
+                if (inSeg)
+                {
+                    int sw = xMax - s0;
+                    if (sw >= minCardW) segs.Add(new Rectangle(s0, y0, sw, bh));
+                }
+                return segs;
+            };
+
+            int sampleCountX = Math.Max(1, (xMax - xMin + 1) / 2);
+            int[] rowAct = new int[h];
+            for (int y = yMin; y < yMax; y++)
+            {
+                int cnt = 0;
+                int rowOff = y * stride;
+                for (int x = xMin; x < xMax; x += 2)
+                {
+                    int off = rowOff + x * 3;
+                    int d = Math.Abs(pixels[off + 2] - bgR) + Math.Abs(pixels[off + 1] - bgG) + Math.Abs(pixels[off] - bgB);
+                    if (d > 15) cnt++;
+                }
+                rowAct[y] = cnt;
+            }
+
+            int rowThresh = Math.Max(6, (int)Math.Round(sampleCountX * 0.020));
+            var bands = new List<Tuple<int, int>>();
+            bool inBand = false;
+            int b0 = 0;
+            for (int y = yMin; y < yMax; y++)
+            {
+                if (rowAct[y] >= rowThresh)
+                {
+                    if (!inBand) { inBand = true; b0 = y; }
+                }
+                else if (inBand)
+                {
+                    inBand = false;
+                    bands.Add(Tuple.Create(b0, y - 1));
+                }
+            }
+            if (inBand) bands.Add(Tuple.Create(b0, yMax - 1));
+
+            var rawCards = new List<Rectangle>();
+            int minThumbH = Math.Max(18, (int)Math.Round(h * 0.045));
+            int maxThumbH = Math.Max(40, (int)Math.Round(h * 0.22));
+            foreach (var b in bands)
+            {
+                int y0 = b.Item1, y1 = b.Item2;
+                int bh = y1 - y0 + 1;
+                if (bh < minThumbH || bh > maxThumbH) continue;
+
+                var colsFull = getCols(y0, y1);
+                if (colsFull.Count > 0)
+                {
+                    var widths = colsFull.Select(r => r.Width).OrderBy(v => v).ToList();
+                    int medW = widths[widths.Count / 2];
+                    if (bh > (int)Math.Round(medW * 1.15) && bh <= (int)Math.Round(medW * 1.68))
+                    {
+                        y1 = y0 + medW - 1;
+                        bh = medW;
+                        colsFull = getCols(y0, y1);
+                    }
+                }
+                if (colsFull.Count == 0) continue;
+
+                bool hasWideFeatureCard = colsFull.Any(r => (double)r.Width / Math.Max(1, r.Height) > 1.8);
+                if (hasWideFeatureCard) continue;
+
+                var squareCards = colsFull.Where(r =>
+                {
+                    double ar = (double)r.Width / Math.Max(1, r.Height);
+                    return ar >= 0.72 && ar <= 1.32 && r.Width <= w * 0.14;
+                }).ToList();
+
+                if (squareCards.Count == 0 || squareCards.Count * 10 < colsFull.Count * 8) continue;
+                rawCards.AddRange(squareCards);
+            }
+
+            if (rawCards.Count == 0) return new List<Tuple<int, int, string>>();
+
+            // Group cards into rows sorted top-to-bottom, left-to-right and generate readable labels
+            var rows = new List<List<Rectangle>>();
+            foreach (var rect in rawCards.OrderBy(r => r.Top).ThenBy(r => r.Left))
+            {
+                double cy = rect.Top + rect.Height / 2.0;
+                List<Rectangle> matchedRow = null;
+                foreach (var rList in rows)
+                {
+                    double refCy = rList[0].Top + rList[0].Height / 2.0;
+                    if (Math.Abs(cy - refCy) <= Math.Max(12, rect.Height * 0.55))
+                    {
+                        matchedRow = rList;
+                        break;
+                    }
+                }
+                if (matchedRow == null)
+                {
+                    matchedRow = new List<Rectangle>();
+                    rows.Add(matchedRow);
+                }
+                matchedRow.Add(rect);
+            }
+
+            var drafts = new List<Tuple<int, int, string>>();
+            int globalIdx = 1;
+            for (int rowIdx = 0; rowIdx < rows.Count; rowIdx++)
+            {
+                var sortedRow = rows[rowIdx].OrderBy(r => r.Left).ToList();
+                for (int colIdx = 0; colIdx < sortedRow.Count; colIdx++)
+                {
+                    Rectangle card = sortedRow[colIdx];
+                    int cx = card.Left + card.Width / 2;
+                    int cy = card.Top + card.Height / 2;
+                    string label = string.Format(CultureInfo.InvariantCulture, "草稿 #{0:D2} (第{1}行·第{2}列)", globalIdx, rowIdx + 1, colIdx + 1);
+                    drafts.Add(Tuple.Create(cx, cy, label));
+                    globalIdx++;
+                }
+            }
+            return drafts;
+        }
+        finally
+        {
+            if (owned24 != null) owned24.Dispose();
+        }
+    }
+
     private void RunScopedScan(int generation)
     {
         string id = Guid.NewGuid().ToString("N");
         try
         {
             Send(new Dictionary<string, object> { { "event", "minimize" } });
-            ScanProgress(id, "preparing", "正在激活剪映窗口并截取首页…");
+            ScanProgress(id, "preparing", _scanMode == "ai" ? "正在激活剪映窗口并截取首页…" : "正在激活并最大化剪映窗口以识别草稿网格…");
             var ack = new CaptureAck { Id = id };
             _scanCapture = ack;
             Send(new Dictionary<string, object> { { "event", "scan-capture" }, { "id", id } });
@@ -383,30 +725,62 @@ bounds 紧贴每张草稿缩略图封面本身，不包含底部文字标题与�
             IntPtr window = (mainWindow != IntPtr.Zero && NativeWin32.WindowArea(mainWindow) > NativeWin32.WindowArea(fgWindow))
                 ? mainWindow
                 : fgWindow;
+            if (_scanMode == "local" && window != IntPtr.Zero && !NativeWin32.IsZoomed(window))
+            {
+                NativeWin32.ShowWindow(window, 3);
+                InterruptibleWait(0.25, generation);
+            }
             int[] frame = WindowFrame(window);
             Rectangle captured = Rectangle.Intersect(new Rectangle(frame[0], frame[1], frame[2], frame[3]), SystemInformation.VirtualScreen);
-            string image = CaptureFastJpegBase64(captured);
-            Send(new Dictionary<string, object> { { "event", "scan-captured" } });
-            Size imageSize = ImageSize(image);
-            ScanProgress(id, "analyzing", "AI 正在快速识别剪映首页草稿…");
-            string prompt = SinglePassScanPrompt(imageSize);
-            List<Tuple<int, int, string>> drafts = null;
-            for (int attempt = 0; attempt < 2; attempt++)
+            if (captured.Width <= 0 || captured.Height <= 0)
             {
-                CheckInterrupted(generation);
-                string answer = RequestAiText(prompt, image, generation, _scanModelKey);
-                ScanProgress(id, "organizing", "正在整理草稿名称与点击坐标");
-                try
+                throw new InvalidOperationException("未能截取到有效的剪映窗口画面。");
+            }
+            List<Tuple<int, int, string>> drafts = null;
+
+            if (_scanMode == "local")
+            {
+                ScanProgress(id, "analyzing", "正在通过图像网格局部特征提取草稿坐标（免AI）…");
+                using (Bitmap screenBmp = new Bitmap(captured.Width, captured.Height, PixelFormat.Format24bppRgb))
                 {
-                    drafts = ParseCardsFast(answer, captured.Width, captured.Height, imageSize);
-                    break;
+                    using (Graphics g = Graphics.FromImage(screenBmp))
+                    {
+                        g.CopyFromScreen(captured.Left, captured.Top, 0, 0, captured.Size);
+                    }
+                    Send(new Dictionary<string, object> { { "event", "scan-captured" } });
+                    CheckInterrupted(generation);
+                    drafts = DetectDraftCardsLocal(screenBmp);
                 }
-                catch (Exception error)
+                if (drafts.Count == 0)
                 {
-                    if (attempt == 1) throw new InvalidOperationException("草稿识别结果解析失败，原队列已保留。" + error.Message);
-                    ScanProgress(id, "analyzing", "AI 返回格式异常，正在自动重试一次");
+                    throw new InvalidOperationException("未检测到草稿缩略图网格，请确保剪映首页已【最大化】并【下滑到底】显示本地草稿区后重试。");
                 }
             }
+            else
+            {
+                string image = CaptureFastJpegBase64(captured);
+                Send(new Dictionary<string, object> { { "event", "scan-captured" } });
+                Size imageSize = ImageSize(image);
+                ScanProgress(id, "analyzing", "AI 正在快速识别剪映首页草稿…");
+                string prompt = SinglePassScanPrompt(imageSize);
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    CheckInterrupted(generation);
+                    string answer = RequestAiText(prompt, image, generation, _scanModelKey);
+                    ScanProgress(id, "organizing", "正在整理草稿名称与点击坐标");
+                    try
+                    {
+                        drafts = ParseCardsFast(answer, captured.Width, captured.Height, imageSize);
+                        break;
+                    }
+                    catch (Exception error)
+                    {
+                        if (attempt == 1) throw new InvalidOperationException("草稿识别结果解析失败，原队列已保留。" + error.Message);
+                        ScanProgress(id, "analyzing", "AI 返回格式异常，正在自动重试一次");
+                    }
+                }
+            }
+
             CheckInterrupted(generation);
             DraftScope scope = new DraftScope
             {
@@ -424,7 +798,10 @@ bounds 紧贴每张草稿缩略图封面本身，不包含底部文字标题与�
                 _draftScope = scope;
                 _queue = drafts.Select(d => new Dictionary<string, object> { { "name", d.Item3 }, { "st", "待处理" } }).ToList();
             }
-            string message = drafts.Count > 0 ? "扫描完成，已识别 " + drafts.Count + " 个草稿" : "扫描完成，当前页面未识别到草稿";
+            if (drafts.Count > 0) SaveDraftGridCoords(drafts, scope);
+            string message = drafts.Count > 0
+                ? (_scanMode == "local" ? "图像识别完成，已锁定 " + drafts.Count + " 个草稿坐标（已保存可复用）" : "扫描完成，已识别 " + drafts.Count + " 个草稿")
+                : "扫描完成，当前页面未识别到草稿";
             ScanProgress(id, "complete", message, drafts.Count);
             Log(message);
         }
