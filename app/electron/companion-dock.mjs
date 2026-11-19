@@ -342,9 +342,9 @@ function panelHtml(acrylic) {
   .stage-num { font-size: 9.5px; font-weight: 800; color: #ffcf6e; letter-spacing: .04em; }
   .stage-tab strong { font-size: 11.5px; font-weight: 750; line-height: 1.2; }
 
-  .scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; padding-right: 2px; }
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; padding-right: 2px; }
   .scroll::-webkit-scrollbar { width: 4px } .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 4px }
-  .card { padding: 10px 11px; border-radius: 13px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  .card { flex: 1 0 auto; padding: 10px 11px; border-radius: 13px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.07); display: flex; flex-direction: column; gap: 8px; }
   .card.active { border-color: rgba(255,207,110,.65); }
   .card[hidden], #jyPostScanArea[hidden] { display: none !important; }
@@ -378,7 +378,7 @@ function panelHtml(acrylic) {
   .path-row { display: flex; align-items: center; gap: 5px; }
   .path-row .input { flex: 1; min-width: 0; }
 
-  .table-wrap { max-height: 150px; overflow-y: auto; overscroll-behavior: contain; border-radius: 9px; border: 1px solid rgba(255,255,255,.1); background: rgba(0,0,0,.24); }
+  .table-wrap { flex: 1 1 130px; height: 130px; min-height: 130px; overflow-y: auto; overscroll-behavior: contain; border-radius: 9px; border: 1px solid rgba(255,255,255,.1); background: rgba(0,0,0,.24); }
   .table-wrap::-webkit-scrollbar { width: 4px; }
   .table-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,.24); border-radius: 4px; }
   table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -402,7 +402,7 @@ function panelHtml(acrylic) {
   .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #ffcf6e, #ff7aa2); transition: width .25s; }
   .log { font-size: 10.5px; color: #c4cbd4; background: rgba(0,0,0,.26); border-radius: 8px; padding: 6px 8px; line-height: 1.45;
     max-height: 64px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
-  .jobs { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; }
+  .jobs { flex: 1 1 110px; height: 110px; min-height: 110px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
   .job { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #d7dde5; padding: 4px 6px; border-radius: 7px; background: rgba(0,0,0,.2); }
   .job span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .job b { font-weight: 600; color: #aab3bf; } .job b.done { color: #8ee06b; } .job b.err { color: #fca5a5; } .job b.run { color: #ffcf6e; }
@@ -554,7 +554,7 @@ function panelHtml(acrylic) {
       </div>
       <button class="btn" id="jySplitDraftsExport" type="button" title="检测草稿目录中以「-1」结尾的文件夹，复制为「XXX-2」并将原草稿出点设为入点">✂️ 检测「XXX-1」复制为「XXX-2」（原出点设入点）</button>
 
-      <div id="jyPostScanArea" style="display:flex;flex-direction:column;gap:8px">
+      <div id="jyPostScanArea" style="flex:1;min-height:0;display:flex;flex-direction:column;gap:8px">
       <div class="table-wrap">
         <table>
           <thead><tr><th style="width:42px">起点</th><th>草稿名称</th><th style="width:64px">状态</th></tr></thead>
@@ -1069,7 +1069,7 @@ function panelHtml(acrylic) {
         $('wmRun').disabled = !wm.running && !(wm.jobs || []).some(j => j.status !== 'done' && j.status !== 'processing');
       }
       $('wmJobs').innerHTML = '';
-      (wm.jobs || []).slice(-6).forEach(j => {
+      (wm.jobs || []).forEach(j => {
         const row = document.createElement('div'); row.className = 'job';
         const name = document.createElement('span'); name.textContent = j.fileName; name.title = j.outputPath || '';
         const st = document.createElement('b');
